@@ -21,26 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Validation and build happen in this same workflow before touching production.
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.2.10
-
-      - name: Install locked dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Type check
-        run: bun run typecheck
-
-      - name: Build application
-        run: bun run build
-
-      - name: Verify production artifacts
-        run: |
-          test -s dist/server.cjs
-          test -s dist/index.html
-
+      # The VPS fetches the source and builds the production image itself.
       - name: Validate deployment secrets
         shell: bash
         env:
