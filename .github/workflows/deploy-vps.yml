@@ -14,13 +14,10 @@ concurrency:
 
 jobs:
   deploy:
-    name: Validate, build and deploy to VPS
+    name: Fetch source, build and deploy on VPS
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       # The VPS fetches the source and builds the production image itself.
       - name: Validate deployment secrets
         shell: bash
