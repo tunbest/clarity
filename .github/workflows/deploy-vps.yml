@@ -18,7 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # The VPS fetches the source and builds the production image itself.
       - name: Validate deployment secrets
         shell: bash
         env:
@@ -44,7 +43,6 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          # Discover the VPS SSH host key at runtime (no VPS_KNOWN_HOSTS secret required).
           ssh-keyscan -H -T 10 -t ed25519 "$VPS_HOST" >> ~/.ssh/known_hosts
           test -s ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
@@ -58,38 +56,49 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
-            "APP_DIR='/root/vp' REPO_URL='https://github.com/tunbest/clarity.git' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'REMOTE'
+            "APP_DIR='/root/vp' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'REMOTE'
           set -euo pipefail
 
+          command -v git >/dev/null 2>&1 || { echo "Git is not installed." >&2; exit 1; }
           command -v docker >/dev/null 2>&1 || { echo "Docker is not installed." >&2; exit 1; }
           docker compose version >/dev/null 2>&1 || { echo "Docker Compose plugin is missing." >&2; exit 1; }
 
-          mkdir -p "$APP_DIR"
-          if [ ! -d "$APP_DIR/.git" ]; then
-            if [ -n "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-              echo "APP_DIR is not empty and is not a Git checkout: $APP_DIR" >&2
-              exit 1
+          PARENT_DIR="$(dirname "$APP_DIR")"
+          mkdir -p "$PARENT_DIR"
+
+          # Keep the existing directory instead of deleting user files.
+          # If it is not a Git checkout, move it aside and reuse its .env if present.
+          if [ -e "$APP_DIR" ] && [ ! -d "$APP_DIR/.git" ]; then
+            BACKUP_DIR="${APP_DIR}.predeploy.$(date +%Y%m%d%H%M%S)"
+            echo "Existing non-Git directory found; preserving it at: $BACKUP_DIR"
+            mv "$APP_DIR" "$BACKUP_DIR"
+            mkdir -p "$APP_DIR"
+            if [ -f "$BACKUP_DIR/.env" ]; then
+              install -m 600 "$BACKUP_DIR/.env" "$APP_DIR/.env"
             fi
+          fi
+
+          if [ ! -d "$APP_DIR/.git" ]; then
             git clone --no-checkout https://github.com/tunbest/clarity.git "$APP_DIR"
           fi
 
           cd "$APP_DIR"
+          git remote set-url origin https://github.com/tunbest/clarity.git
           git fetch origin "$DEPLOY_SHA"
-          git checkout --detach "$DEPLOY_SHA"
+          git checkout --detach --force "$DEPLOY_SHA"
 
-          test -f .env || { echo "Production .env is missing on the VPS." >&2; exit 1; }
+          test -f .env || { echo "Production .env is missing on the VPS ($APP_DIR/.env)." >&2; exit 1; }
           if [ ! -f docker-compose.yml ] && [ ! -f compose.yml ] && [ ! -f compose.yaml ] && [ ! -f docker-compose.yaml ]; then
-            echo "No Docker Compose file found." >&2
+            echo "No Docker Compose file found in $APP_DIR." >&2
             exit 1
           fi
 
           docker compose config --quiet
           docker compose up -d --build --remove-orphans
 
-          # Wait for the app health endpoint from inside its container.
           healthy=0
           for attempt in $(seq 1 30); do
-            if docker compose exec -T app curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+            if docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
               healthy=1
               break
             fi
