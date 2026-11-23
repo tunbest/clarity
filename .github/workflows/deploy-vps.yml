@@ -47,11 +47,9 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
-          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          for name in VPS_HOST VPS_USER VPS_SSH_KEY VPS_APP_DIR VPS_KNOWN_HOSTS; do
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
             if [[ -z "${!name}" ]]; then
               echo "::error::GitHub secret ${name} is missing"
               exit 1
@@ -62,13 +60,14 @@ jobs:
         shell: bash
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # Discover the VPS SSH host key at runtime (no VPS_KNOWN_HOSTS secret required).
+          ssh-keyscan -H -T 10 -t ed25519 "$VPS_HOST" >> ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Deploy exact pushed commit on VPS
@@ -76,12 +75,11 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
-          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
           DEPLOY_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
-            "APP_DIR='$VPS_APP_DIR' REPO_URL='https://github.com/tunbest/clarity.git' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'REMOTE'
+            "APP_DIR='/root/vp' REPO_URL='https://github.com/tunbest/clarity.git' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'REMOTE'
           set -euo pipefail
 
           command -v docker >/dev/null 2>&1 || { echo "Docker is not installed." >&2; exit 1; }
