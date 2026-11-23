@@ -1,26 +1,47 @@
-name: Deploy Clarity PM to VPS
+name: Clarity PM - Deploy Production
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: clarity-production
   cancel-in-progress: false
 
-permissions:
-  contents: read
-
 jobs:
   deploy:
-    name: Build and deploy
+    name: Validate, build and deploy to VPS
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate deployment configuration
+      # Validation and build happen in this same workflow before touching production.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.10
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Build application
+        run: bun run build
+
+      - name: Verify production artifacts
+        run: |
+          test -s dist/server.cjs
+          test -s dist/index.html
+
+      - name: Validate deployment secrets
         shell: bash
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -45,55 +66,65 @@ jobs:
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Deploy on VPS
+      - name: Deploy exact pushed commit on VPS
         shell: bash
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
-            "APP_DIR='$VPS_APP_DIR' REPO_URL='https://github.com/tunbest/clarity.git' bash -s" <<'REMOTE'
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \\
+            "APP_DIR='$VPS_APP_DIR' REPO_URL='https://github.com/tunbest/clarity.git' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'REMOTE'
           set -euo pipefail
 
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "Docker is not installed on the VPS." >&2
-            exit 1
-          fi
-          if ! docker compose version >/dev/null 2>&1; then
-            echo "Docker Compose plugin is not installed on the VPS." >&2
-            exit 1
-          fi
+          command -v docker >/dev/null 2>&1 || { echo "Docker is not installed." >&2; exit 1; }
+          docker compose version >/dev/null 2>&1 || { echo "Docker Compose plugin is missing." >&2; exit 1; }
 
           mkdir -p "$APP_DIR"
           if [ ! -d "$APP_DIR/.git" ]; then
             if [ -n "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-              echo "APP_DIR exists and is not empty, but is not a Git checkout: $APP_DIR" >&2
+              echo "APP_DIR is not empty and is not a Git checkout: $APP_DIR" >&2
               exit 1
             fi
-            git clone --branch main --single-branch "$REPO_URL" "$APP_DIR"
+            git clone --no-checkout https://github.com/tunbest/clarity.git "$APP_DIR"
           fi
 
           cd "$APP_DIR"
-          git fetch origin main
-          git reset --hard origin/main
+          git fetch origin "$DEPLOY_SHA"
+          git checkout --detach "$DEPLOY_SHA"
 
-          if [ ! -f .env ]; then
-            echo "Missing production .env in $APP_DIR. Create it on the VPS; never commit it." >&2
-            exit 1
-          fi
+          test -f .env || { echo "Production .env is missing on the VPS." >&2; exit 1; }
           if [ ! -f docker-compose.yml ] && [ ! -f compose.yml ] && [ ! -f compose.yaml ] && [ ! -f docker-compose.yaml ]; then
-            echo "No Docker Compose file found in $APP_DIR." >&2
+            echo "No Docker Compose file found." >&2
             exit 1
           fi
 
           docker compose config --quiet
           docker compose up -d --build --remove-orphans
+
+          # Wait for the app health endpoint from inside its container.
+          healthy=0
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T app curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+              healthy=1
+              break
+            fi
+            sleep 5
+          done
+
           docker compose ps
+          if [ "$healthy" -ne 1 ]; then
+            docker compose logs --tail=120 app postgres || true
+            echo "Clarity health check failed." >&2
+            exit 1
+          fi
+
+          echo "Clarity PM deployed successfully: $DEPLOY_SHA"
           REMOTE
