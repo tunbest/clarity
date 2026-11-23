@@ -1,63 +1,46 @@
-name: Deploy Clarity PM to VPS
+name: Clarity PM - Deploy VPS
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["Clarity PM - CI"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: clarity-production
+  group: clarity-vps-production
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy on VPS
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
-      - name: Deploy over SSH
+      - name: Deploy validated main revision
         uses: appleboy/ssh-action@v1.2.2
-        env:
-          APP_DIR: ${{ secrets.VPS_APP_DIR }}
-          DEPLOY_BRANCH: main
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           fingerprint: ${{ secrets.VPS_FINGERPRINT }}
-          port: ${{ secrets.VPS_PORT || '22' }}
-          envs: APP_DIR,DEPLOY_BRANCH
           script_stop: true
           script: |
-            set -Eeuo pipefail
-
-            : "${APP_DIR:?Le secret VPS_APP_DIR est obligatoire}"
-            : "${DEPLOY_BRANCH:?La branche de déploiement est obligatoire}"
-
-            cd "$APP_DIR"
-            test -f .env || { echo "ERREUR: .env absent dans $APP_DIR"; exit 1; }
-
-            git fetch --prune origin "$DEPLOY_BRANCH"
-            git checkout "$DEPLOY_BRANCH"
-            git reset --hard "origin/$DEPLOY_BRANCH"
-
+            set -eu
+            cd "${{ secrets.VPS_APP_DIR }}"
+            git fetch origin ${{ github.event.workflow_run.head_sha }}
+            git reset --hard ${{ github.event.workflow_run.head_sha }}
             docker compose config --quiet
             docker compose build --pull app
             docker compose up -d --remove-orphans
-
-            for attempt in $(seq 1 30); do
-              if docker compose exec -T app curl -fsS http://127.0.0.1:3000/api/health >/dev/null; then
-                echo "Clarity PM est opérationnel."
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:${APP_PORT:-3000}/api/health >/dev/null; then
+                echo "Clarity PM deployment healthy"
                 exit 0
               fi
               sleep 5
             done
-
-            echo "ERREUR: le contrôle de santé de Clarity PM a échoué."
             docker compose ps
-            docker compose logs --tail=100 app
+            docker compose logs --tail=120 app postgres
             exit 1

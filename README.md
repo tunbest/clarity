@@ -3,41 +3,43 @@
 Application de pilotage de portefeuille et de projets : projets, MEP, Change/RITM, tâches, jalons, risques, Kanban, planning, rapports et comptes-rendus.
 
 ## Stack
-- React + Vite
-- API Express / Bun
+- React 19 + TypeScript + Vite
+- API Express 4 compilée avec esbuild
+- Bun 1.2.10
 - PostgreSQL 16
 - Docker Compose
 
-## Prérequis
-- Docker Engine et Docker Compose sur le VPS
-- Un fichier `.env` créé directement sur le VPS (ne jamais le committer)
-- Le dépôt cloné sur le VPS dans le répertoire défini par le secret GitHub `VPS_APP_DIR`
+## Développement et validation
 
-## Déploiement automatique
-Chaque push sur `main` lance `.github/workflows/deploy.yml`. Le runner se connecte au VPS en SSH, met à jour le dépôt et reconstruit le service applicatif.
+```bash
+bun install --frozen-lockfile
+bun run typecheck
+bun run build
+```
 
-Configurer les secrets GitHub suivants dans Settings > Secrets and variables > Actions :
+La commande `bun run build` génère à la fois l'interface `dist/index.html` et le serveur `dist/server.cjs`. Le serveur de production est lancé par `bun run dist/server.cjs`.
 
-| Secret | Description |
-|---|---|
-| `VPS_HOST` | Adresse IP ou nom DNS du VPS |
-| `VPS_USER` | Utilisateur SSH de déploiement |
-| `VPS_SSH_KEY` | Clé privée SSH dédiée au déploiement |
-| `VPS_FINGERPRINT` | Empreinte SHA256 de la clé d'hôte SSH du VPS |
-| `VPS_APP_DIR` | Chemin absolu du dépôt sur le VPS |
+## Déploiement VPS
 
-Le fichier `.env` doit déjà exister dans `VPS_APP_DIR` et contenir les variables requises par `docker-compose.yml`. Il n'est jamais transféré par GitHub Actions.
+- Docker Engine et Docker Compose v2 sur le VPS
+- Créer `.env` sur le VPS à partir de `.env.example` avec des secrets uniques
+- Cloner le dépôt dans le chemin du secret GitHub `VPS_APP_DIR`
+- Configurer les secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_FINGERPRINT` et `VPS_APP_DIR`
+- Configurer un reverse proxy HTTPS vers `127.0.0.1:3000`
 
-## Première installation VPS
-1. Installer Docker Engine et le plugin Docker Compose.
-2. Cloner ce dépôt dans le répertoire qui sera utilisé comme `VPS_APP_DIR`.
-3. Créer et renseigner `.env` à partir de `.env.example` (mots de passe forts et uniques).
-4. Vérifier `docker compose config`.
-5. Lancer `docker compose up -d --build`.
-6. Configurer le reverse proxy HTTPS vers `127.0.0.1:3000` si nécessaire.
+Le workflow `.github/workflows/deploy.yml` déploie la branche `main`. Le workflow `.github/workflows/ci.yml` vérifie le typage et la compilation.
 
 ## Sécurité
-- Ne jamais committer `.env`, clés privées, dumps ou sauvegardes.
-- Utiliser une clé SSH dédiée avec les permissions minimales nécessaires.
-- La base PostgreSQL utilise un volume Docker persistant nommé `pgdata`.
-- Aucune authentification Microsoft Entra ID n'est requise pour le mode d'authentification locale.
+
+- Authentification serveur par mot de passe, session opaque en cookie HttpOnly/SameSite, sans Microsoft Entra ID
+- Ne jamais committer `.env`, clés privées, dumps ou sauvegardes
+- PostgreSQL reste sur le réseau Docker interne
+- Le volume `pgdata` conserve les données entre les redémarrages
+- PostgreSQL est la source de vérité : portefeuille projets, tâches, jalons, risques, utilisateurs, paramètres et MEP
+- Chaque MEP référence obligatoirement un `projectId` d'un projet Clarity existant ; tâches MEP, Change/RITM, participants et comptes-rendus sont enregistrés dans le même agrégat MEP côté serveur
+- Le navigateur ne conserve aucune donnée métier ni session : l'authentification repose sur un cookie HttpOnly et les écrans chargent/sauvegardent via l'API
+- Utiliser des mots de passe uniques et renouveler les identifiants précédemment exposés
+
+## Modèle de données
+
+Le mode navigateur autonome est retiré. Clarity nécessite le serveur Express et PostgreSQL pour fonctionner. Les exports JSON/CSV sont des fichiers de sauvegarde explicites ; ils ne constituent pas un stockage applicatif.

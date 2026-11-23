@@ -1,0 +1,1391 @@
+import 'dotenv/config';
+import express, { Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
+import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI } from '@google/genai';
+import { dbStore, getPgPool } from './src/db/dbClient';
+import { UserRole, AppUser } from './src/types';
+
+const app = express();
+const PORT = 3000;
+
+app.disable('x-powered-by');
+app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+  }
+  next();
+});
+app.use(express.json({ limit: '10mb' }));
+
+// Authenticated identity is populated only by the database-backed session middleware.
+function getUserFromRequest(req: Request): AppUser {
+  const user = (req as any).authUser as AppUser | undefined;
+  if (!user) throw new Error('Unauthenticated request reached a protected handler');
+  return user;
+}
+
+// Strict RBAC Permission Evaluator
+const RBAC = {
+  canCreateOrDeleteProject: (role: UserRole) => {
+    return role === 'DIRECTEUR_PROJETS' || role === 'ADMINISTRATEUR';
+  },
+  canManageResources: (role: UserRole) => {
+    return role === 'DIRECTEUR_PROJETS' || role === 'ADMINISTRATEUR';
+  },
+  canManageTasks: (role: UserRole) => {
+    return role === 'DIRECTEUR_PROJETS' || role === 'CHEF_PROJET' || role === 'PMO' || role === 'CONTRIBUTEUR' || role === 'ADMINISTRATEUR';
+  },
+  canManageRisks: (role: UserRole) => {
+    return role === 'DIRECTEUR_PROJETS' || role === 'CHEF_PROJET' || role === 'CHEF_PROJET_PROD' || role === 'PMO' || role === 'ADMINISTRATEUR';
+  },
+  canManageBudget: (role: UserRole) => {
+    // Le Chef de Projet Production n'a strictement aucun budget à gérer
+    return role === 'DIRECTEUR_PROJETS' || role === 'CHEF_PROJET' || role === 'ADMINISTRATEUR';
+  },
+  canManageReleases: (role: UserRole) => {
+    return role === 'CHEF_PROJET_PROD' || role === 'DIRECTEUR_PROJETS' || role === 'ADMINISTRATEUR';
+  },
+  canAccessAdmin: (role: UserRole) => {
+    return role === 'ADMINISTRATEUR';
+  },
+  canAccessPortfolio: (role: UserRole) => {
+    return role === 'DIRECTEUR_PROJETS' || role === 'PMO';
+  },
+};
+
+
+// Initialize Gemini SDK lazily/safely
+let aiClient: GoogleGenAI | null = null;
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return aiClient;
+}
+
+// Resilient Gemini Execution Pipeline (Handles 503 / high-demand / fallback models)
+async function callGeminiResilient(
+  params: { prompt: string; isJson?: boolean }
+): Promise<string | null> {
+  const ai = getGeminiClient();
+  if (!ai) return null;
+
+  const candidateModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+
+  for (const model of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: params.prompt,
+        config: params.isJson ? { responseMimeType: 'application/json' } : undefined,
+      });
+
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (_err) {
+      // Model temporarily busy or unavailable; smoothly advance to next candidate model
+      continue;
+    }
+  }
+
+  return null;
+}
+
+// --- LOCAL AUTHENTICATION (PostgreSQL + opaque HttpOnly sessions) ---
+import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
+import { promisify } from 'node:util';
+const scrypt = promisify(scryptCallback);
+const SESSION_COOKIE = 'clarity_session';
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const VALID_ROLES = ['ADMINISTRATEUR','DIRECTEUR_PROJETS','PMO','CHEF_PROJET','CHEF_PROJET_PROD','CONTRIBUTEUR'];
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16);
+  const derived = await scrypt(password, salt, 64) as Buffer;
+  return `scrypt$${salt.toString('hex')}$${derived.toString('hex')}`;
+}
+async function verifyPassword(password: string, encoded: string): Promise<boolean> {
+  const [kind, saltHex, hashHex] = String(encoded || '').split('$');
+  if (kind !== 'scrypt' || !saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = await scrypt(password, Buffer.from(saltHex, 'hex'), expected.length) as Buffer;
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+function cookieValue(req: Request, name: string): string | null {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const [key, ...value] = part.trim().split('=');
+    if (key === name) return decodeURIComponent(value.join('='));
+  }
+  return null;
+}
+function setSessionCookie(res: Response, token: string) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS/1000}${secure}`);
+}
+function clearSessionCookie(res: Response) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`);
+}
+async function ensureAuthSchema() {
+  const pool = getPgPool();
+  if (!pool) throw new Error('PostgreSQL configuration (POSTGRES_HOST or DATABASE_URL) is required in production');
+  await pool.query(`CREATE TABLE IF NOT EXISTS app_users (
+    id UUID PRIMARY KEY, display_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK (role = ANY(ARRAY['ADMINISTRATEUR','DIRECTEUR_PROJETS','PMO','CHEF_PROJET','CHEF_PROJET_PROD','CONTRIBUTEUR'])),
+    job_title TEXT, department TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), disabled BOOLEAN NOT NULL DEFAULT FALSE
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS app_sessions (
+    token_hash CHAR(64) PRIMARY KEY, user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS app_sessions_expiry_idx ON app_sessions(expires_at)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS workspace_state (id SMALLINT PRIMARY KEY CHECK (id=1), projects JSONB NOT NULL, revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS mep_workspace_state (id SMALLINT PRIMARY KEY CHECK (id=1), meps JSONB NOT NULL DEFAULT '[]'::jsonb, revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`INSERT INTO mep_workspace_state(id,meps,revision) VALUES(1,'[]'::jsonb,1) ON CONFLICT(id) DO NOTHING`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS system_settings (id SMALLINT PRIMARY KEY CHECK (id=1), settings JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`INSERT INTO system_settings(id,settings) VALUES(1,'{}'::jsonb) ON CONFLICT(id) DO NOTHING`);
+  // First administrator is created only from deployment secrets; no demo/default account exists.
+  const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  if (email && password) {
+    if (password.length < 14) throw new Error('BOOTSTRAP_ADMIN_PASSWORD must contain at least 14 characters');
+    const exists = await pool.query('SELECT id FROM app_users WHERE email=$1', [email]);
+    if (!exists.rowCount) {
+      await pool.query('INSERT INTO app_users(id,display_name,email,password_hash,role,job_title) VALUES($1,$2,$3,$4,$5,$6)',
+        [randomUUID(), process.env.BOOTSTRAP_ADMIN_NAME || 'Administrateur', email, await hashPassword(password), 'ADMINISTRATEUR', 'Administrateur système']);
+      console.info('Bootstrap administrator created.');
+    }
+  }
+}
+
+app.get('/api/health', async (_req: Request, res: Response) => {
+  try { const pool=getPgPool(); if(!pool) throw new Error('Database is not configured'); await pool.query('SELECT 1'); res.json({status:'ok', database:'connected'}); }
+  catch { res.status(503).json({status:'error', database:'unavailable'}); }
+});
+
+app.get('/api/auth/me', async (req: Request, res: Response) => {
+  const token = cookieValue(req, SESSION_COOKIE);
+  if (!token) return res.json({isAuthenticated:false,user:null,isConfigured:false});
+  const pool = getPgPool();
+  if (!pool) return res.status(503).json({isAuthenticated:false,user:null});
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const result = await pool.query(`SELECT u.id,u.display_name,u.email,u.role,u.job_title,u.department,s.expires_at
+    FROM app_sessions s JOIN app_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() AND u.disabled=FALSE`, [tokenHash]);
+  if (!result.rowCount) return res.json({isAuthenticated:false,user:null,isConfigured:false});
+  const u=result.rows[0];
+  res.json({isAuthenticated:true,isConfigured:false,user:{id:u.id,displayName:u.display_name,email:u.email,role:u.role,jobTitle:u.job_title,department:u.department,authProvider:'LOCAL',connectedAt:new Date().toISOString()}});
+});
+
+const loginAttempts = new Map<string,{count:number; until:number}>();
+app.post('/api/auth/login-password', async (req: Request, res: Response) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now(); const attempt = loginAttempts.get(ip);
+  if (attempt && attempt.until > now && attempt.count >= 8) return res.status(429).json({success:false,error:'Trop de tentatives. Réessayez dans quelques minutes.'});
+  if (loginAttempts.size > 10000) { for (const [key,value] of loginAttempts) if (value.until <= now) loginAttempts.delete(key); }
+  const identifier=String(req.body?.identifier || req.body?.email || '').trim().toLowerCase();
+  const password=String(req.body?.password || '');
+  if (!identifier || !password || password.length > 256) return res.status(400).json({success:false,error:'Identifiant et mot de passe requis.'});
+  const pool=getPgPool(); if (!pool) return res.status(503).json({success:false,error:'Base de données indisponible.'});
+  const found=await pool.query('SELECT * FROM app_users WHERE email=$1 AND disabled=FALSE LIMIT 1',[identifier]);
+  const user=found.rows[0];
+  const valid=user ? await verifyPassword(password,user.password_hash) : false;
+  if (!valid) {
+    const next=attempt && attempt.until>now ? {count:attempt.count+1,until:attempt.until} : {count:1,until:now+15*60*1000};
+    loginAttempts.set(ip,next);
+    return res.status(401).json({success:false,error:'Identifiants invalides.'});
+  }
+  loginAttempts.delete(ip);
+  const token=randomBytes(32).toString('base64url');
+  const tokenHash=createHash('sha256').update(token).digest('hex');
+  await pool.query('DELETE FROM app_sessions WHERE expires_at<NOW()');
+  await pool.query('INSERT INTO app_sessions(token_hash,user_id,expires_at) VALUES($1,$2,NOW()+INTERVAL \'8 hours\')',[tokenHash,user.id]);
+  setSessionCookie(res,token);
+  res.json({success:true,user:{id:user.id,displayName:user.display_name,email:user.email,role:user.role,jobTitle:user.job_title,department:user.department,authProvider:'LOCAL',connectedAt:new Date().toISOString()}});
+});
+
+app.post('/api/auth/logout', async (req: Request, res: Response) => {
+  const token=cookieValue(req,SESSION_COOKIE); const pool=getPgPool();
+  if (token && pool) await pool.query('DELETE FROM app_sessions WHERE token_hash=$1',[createHash('sha256').update(token).digest('hex')]);
+  clearSessionCookie(res); res.json({success:true});
+});
+
+// No role or identity can be selected by the browser. Every other API requires a live DB session.
+app.use('/api', async (req: Request, res: Response, next) => {
+  if (req.path === '/health' || req.path === '/auth/me' || req.path === '/auth/login-password' || req.path === '/auth/logout') return next();
+  try {
+    const token=cookieValue(req,SESSION_COOKIE); if (!token) return res.status(401).json({error:'Authentification requise.'});
+    const pool=getPgPool(); if (!pool) return res.status(503).json({error:'Base de données indisponible.'});
+    const tokenHash=createHash('sha256').update(token).digest('hex');
+    const result=await pool.query(`SELECT u.id,u.display_name,u.email,u.role,u.job_title,u.department FROM app_sessions s JOIN app_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() AND u.disabled=FALSE`,[tokenHash]);
+    if (!result.rowCount) { clearSessionCookie(res); return res.status(401).json({error:'Session expirée.'}); }
+    const u=result.rows[0];
+    (req as any).authUser={id:u.id,displayName:u.display_name,email:u.email,role:u.role,jobTitle:u.job_title,department:u.department,authProvider:'LOCAL',connectedAt:new Date().toISOString()};
+    const role=u.role as UserRole; const method=req.method.toUpperCase(); const route=req.path;
+    const write=['POST','PUT','PATCH','DELETE'].includes(method);
+    if ((route.startsWith('/users') || route.startsWith('/admin') || route === '/schema/sql' || route === '/audit-logs') && role !== 'ADMINISTRATEUR') return res.status(403).json({error:'Accès administrateur requis.'});
+    if ((route === '/projects' && method === 'POST' || /^\/projects\/[^/]+$/.test(route) && method === 'DELETE') && !RBAC.canCreateOrDeleteProject(role)) return res.status(403).json({error:'Droits insuffisants pour cette opération.'});
+    if (route === '/workspace' && method === 'PUT' && role === 'CONTRIBUTEUR') return res.status(403).json({error:'Les contributeurs ne peuvent pas remplacer le portefeuille complet.'});
+    if (/^\/projects\/[^/]+$/.test(route) && method === 'PUT' && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','PMO'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour modifier ce projet.'});
+    if (/^\/projects\/[^/]+\/team/.test(route) && write && !RBAC.canManageResources(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les ressources.'});
+    if (/^\/projects\/[^/]+\/tasks/.test(route) && write && !RBAC.canManageTasks(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les tâches.'});
+    if (/^\/projects\/[^/]+\/risks/.test(route) && write && !RBAC.canManageRisks(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les risques.'});
+    if (/^\/projects\/[^/]+\/milestones/.test(route) && write && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','CHEF_PROJET_PROD','PMO'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les jalons.'});
+    if (route === '/meps' && write && !['ADMINISTRATEUR','CHEF_PROJET_PROD','DIRECTEUR_PROJETS','CHEF_PROJET','PMO'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les MEP.'});
+    if (route.startsWith('/portfolio') && !RBAC.canAccessPortfolio(role) && role !== 'ADMINISTRATEUR') return res.status(403).json({error:'Accès au portefeuille refusé.'});
+    if (route.startsWith('/copilot') && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','CHEF_PROJET_PROD'].includes(role)) return res.status(403).json({error:'Accès Copilot refusé.'});
+    next();
+  } catch (e) { next(e); }
+});
+
+// Shared workspace snapshot: PostgreSQL is the source of truth for the SPA's project portfolio.
+app.get('/api/workspace', async (_req: Request,res: Response) => {
+  const pool=getPgPool()!;
+  let r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');
+  if(!r.rowCount){
+    await pool.query('INSERT INTO workspace_state(id,projects,revision) VALUES(1,$1::jsonb,1) ON CONFLICT(id) DO NOTHING',[JSON.stringify(dbStore.getAllProjects())]);
+    r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');
+  }
+  res.json({success:true,projects:r.rows[0].projects,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
+});
+app.put('/api/workspace', async (req: Request,res: Response) => {
+  const projects=req.body?.projects; const revision=Number(req.body?.revision);
+  if(!Array.isArray(projects) || projects.length>500 || !Number.isSafeInteger(revision) || revision<1 || projects.some((p:any)=>!p || typeof p!=='object' || typeof p.id!=='string' || typeof p.name!=='string' || p.id.length>128 || p.name.length>300)) return res.status(400).json({error:'Données de portefeuille invalides.'});
+  const pool=getPgPool()!;
+  const retainedIds = new Set<string>(projects.map((p:any) => String(p.id)));
+  const mepResult = await pool.query('SELECT meps FROM mep_workspace_state WHERE id=1');
+  const linkedMeps: any[] = mepResult.rows[0]?.meps || [];
+  const orphaned = linkedMeps.filter((m:any) => !retainedIds.has(String(m.projectId)));
+  if (orphaned.length) return res.status(409).json({error:`Suppression refusée : ${orphaned.length} MEP sont encore rattachées à un projet. Réaffectez-les avant de supprimer ce projet.`});
+  const r=await pool.query('UPDATE workspace_state SET projects=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at',[JSON.stringify(projects),revision]);
+  if(!r.rowCount) return res.status(409).json({error:'Le portefeuille a été modifié par un autre utilisateur. Rechargez les données avant de réessayer.'});
+  res.json({success:true,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
+});
+
+// Central MEP repository: every MEP belongs to an existing Clarity project.
+app.get('/api/meps', async (_req: Request, res: Response) => {
+  const pool = getPgPool()!;
+  const result = await pool.query('SELECT meps, revision, updated_at FROM mep_workspace_state WHERE id=1');
+  const row = result.rows[0];
+  res.json({ success: true, meps: row?.meps || [], revision: Number(row?.revision || 1), updatedAt: row?.updated_at || null });
+});
+app.put('/api/meps', async (req: Request, res: Response) => {
+  const meps = req.body?.meps;
+  const revision = Number(req.body?.revision);
+  if (!Array.isArray(meps) || meps.length > 5000 || !Number.isSafeInteger(revision) || revision < 1) {
+    return res.status(400).json({ error: 'Données MEP invalides.' });
+  }
+  const seen = new Set<string>();
+  for (const mep of meps) {
+    if (!mep || typeof mep.id !== 'string' || !mep.id || typeof mep.projectId !== 'string' || !mep.projectId || typeof mep.title !== 'string') {
+      return res.status(400).json({ error: 'Chaque MEP doit être rattachée à un projet Clarity existant.' });
+    }
+    if (seen.has(mep.id)) return res.status(400).json({ error: 'Identifiant MEP dupliqué.' });
+    seen.add(mep.id);
+  }
+  const pool = getPgPool()!;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const projects = await client.query('SELECT projects FROM workspace_state WHERE id=1 FOR SHARE');
+    const projectIds = new Set<string>((projects.rows[0]?.projects || []).map((p: any) => String(p.id)));
+    if (meps.some((m: any) => !projectIds.has(m.projectId))) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({ error: 'Une MEP référence un projet inexistant. Rechargez le portefeuille et réessayez.' });
+    }
+    const updated = await client.query('UPDATE mep_workspace_state SET meps=$1::jsonb, revision=revision+1, updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(meps), revision]);
+    if (!updated.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Les MEP ont été modifiées par un autre utilisateur. Rechargez les données avant de réessayer.' });
+    }
+    await client.query('COMMIT');
+    res.json({ success: true, revision: Number(updated.rows[0].revision), updatedAt: updated.rows[0].updated_at });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+});
+
+// User administration is intentionally restricted to administrators and persisted in PostgreSQL.
+app.use('/api/users', (req: Request, res: Response, next) => {
+  const user=(req as any).authUser as AppUser;
+  if (!user || user.role !== 'ADMINISTRATEUR') return res.status(403).json({error:'Accès administrateur requis.'});
+  next();
+});
+app.get('/api/admin/settings', async (_req: Request, res: Response) => {
+  const result = await getPgPool()!.query('SELECT settings FROM system_settings WHERE id=1');
+  res.json({ success: true, settings: result.rows[0]?.settings || {} });
+});
+app.put('/api/admin/settings', async (req: Request, res: Response) => {
+  const settings = req.body?.settings;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings) || JSON.stringify(settings).length > 100000) return res.status(400).json({ error: 'Paramètres invalides.' });
+  await getPgPool()!.query('UPDATE system_settings SET settings=$1::jsonb,updated_at=NOW() WHERE id=1', [JSON.stringify(settings)]);
+  res.json({ success: true });
+});
+app.get('/api/users', async (_req: Request,res: Response) => {
+  const r=await getPgPool()!.query('SELECT id,display_name AS "displayName",email,role,job_title AS "jobTitle",department FROM app_users ORDER BY display_name');
+  res.json({success:true,users:r.rows});
+});
+app.post('/api/users', async (req: Request,res: Response) => {
+  const {displayName,email,role,password,jobTitle,department}=req.body||{};
+  const cleanEmail=String(email||'').trim().toLowerCase();
+  if (!displayName || !/^\S+@\S+\.\S+$/.test(cleanEmail) || !VALID_ROLES.includes(role) || String(password||'').length<12) return res.status(400).json({error:'Nom, e-mail valide, rôle et mot de passe (12 caractères minimum) requis.'});
+  try { const id=randomUUID(); const r=await getPgPool()!.query('INSERT INTO app_users(id,display_name,email,password_hash,role,job_title,department) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,display_name AS "displayName",email,role,job_title AS "jobTitle",department',[id,String(displayName).trim(),cleanEmail,await hashPassword(password),role,jobTitle||null,department||null]); res.status(201).json({success:true,user:r.rows[0]}); }
+  catch(e:any) { if(e.code==='23505') return res.status(409).json({error:'Cet e-mail existe déjà.'}); throw e; }
+});
+app.delete('/api/users/:id', async (req: Request,res: Response) => {
+  const current=(req as any).authUser as AppUser;
+  if(current.id===req.params.id) return res.status(400).json({error:'Vous ne pouvez pas supprimer votre propre compte.'});
+  const r=await getPgPool()!.query('DELETE FROM app_users WHERE id=$1 RETURNING id',[req.params.id]);
+  if(!r.rowCount) return res.status(404).json({error:'Utilisateur introuvable.'}); res.json({success:true});
+});
+app.put('/api/users/:id', async (req: Request,res: Response) => {
+  const {displayName,role,jobTitle,department,password}=req.body||{};
+  if(role && !VALID_ROLES.includes(role)) return res.status(400).json({error:'Rôle invalide.'});
+  const actor=(req as any).authUser as AppUser;
+  if(role && actor.id===req.params.id && role!==actor.role) return res.status(400).json({error:'Vous ne pouvez pas modifier votre propre rôle.'});
+  if(role && role!=='ADMINISTRATEUR') {
+    const target=await getPgPool()!.query('SELECT role FROM app_users WHERE id=$1',[req.params.id]);
+    if(target.rows[0]?.role==='ADMINISTRATEUR') {
+      const admins=await getPgPool()!.query("SELECT COUNT(*)::int AS count FROM app_users WHERE role='ADMINISTRATEUR' AND disabled=FALSE");
+      if(admins.rows[0].count<=1) return res.status(409).json({error:'Impossible de retirer le dernier compte administrateur.'});
+    }
+  }
+  const fields:string[]=[]; const values:any[]=[];
+  const add=(col:string,val:any)=>{values.push(val);fields.push(`${col}=$${values.length}`)};
+  if(displayName!==undefined)add('display_name',String(displayName).trim()); if(role)add('role',role); if(jobTitle!==undefined)add('job_title',jobTitle); if(department!==undefined)add('department',department); if(password){if(String(password).length<12)return res.status(400).json({error:'12 caractères minimum.'});add('password_hash',await hashPassword(String(password)));}
+  if(!fields.length)return res.status(400).json({error:'Aucune modification.'}); values.push(req.params.id);
+  const r=await getPgPool()!.query(`UPDATE app_users SET ${fields.join(',')} WHERE id=$${values.length} RETURNING id,display_name AS "displayName",email,role,job_title AS "jobTitle",department`,values);
+  if(!r.rowCount)return res.status(404).json({error:'Utilisateur introuvable.'});
+  if(password) await getPgPool()!.query('DELETE FROM app_sessions WHERE user_id=$1',[req.params.id]);
+  res.json({success:true,user:r.rows[0]});
+});
+
+// API: Admin Settings & Integration Tests
+app.post('/api/admin/postgres/test-connection', async (_req: Request, res: Response) => {
+  const start=Date.now();
+  try { await getPgPool()!.query('SELECT 1'); res.json({success:true,message:'Connexion PostgreSQL vérifiée.',latencyMs:Date.now()-start,timestamp:new Date().toISOString()}); }
+  catch { res.status(503).json({success:false,error:'Connexion PostgreSQL indisponible.'}); }
+});
+
+app.post('/api/admin/copilot/test', async (req: Request, res: Response) => {
+  const { model = 'gemini-3.7-flash' } = req.body || {};
+  const testPrompt = 'Réponds uniquement par le mot "OPÉRATIONNEL" en français.';
+  const start = Date.now();
+  const reply = await callGeminiResilient({ prompt: testPrompt });
+  const latencyMs = Date.now() - start;
+
+  if (!reply) return res.status(503).json({success:false,error:'Le service IA n’a pas répondu. Vérifiez la clé API et la disponibilité du fournisseur.'});
+  res.json({success:true,message:'Réponse du fournisseur IA reçue.',model,reply:reply.trim(),latencyMs,timestamp:new Date().toISOString()});
+});
+
+// API: Audio Transcription powered by model 'gemini-3.5-transcribe'
+app.post('/api/transcribe', async (req: Request, res: Response) => {
+  try {
+    const { audioBase64, mimeType = 'audio/webm' } = req.body || {};
+    if (!audioBase64) {
+      return res.status(400).json({ success: false, error: 'Aucun enregistrement audio transmis.' });
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json({
+        success: true,
+        text: 'Cadrage fonctionnel et spécifications techniques validées pour la nouvelle version.',
+        simulated: true,
+      });
+    }
+
+    const cleanBase64 = audioBase64.includes(',') ? audioBase64.split(',')[1] : audioBase64;
+    const cleanMime = (mimeType.split(';')[0] || 'audio/webm').trim();
+
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-transcribe',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType: cleanMime,
+                  data: cleanBase64,
+                },
+              },
+              {
+                text: 'Transcribe the audio precisely in French. Provide only the clear text transcription without formatting, preamble, quotation marks or comments.',
+              },
+            ],
+          },
+        ],
+      });
+
+      const transcription = response?.text?.trim() || '';
+      return res.json({ success: true, text: transcription });
+    } catch (modelErr: any) {
+      console.warn('gemini-3.5-transcribe primary invocation error:', modelErr?.message);
+      // Secondary fallback with gemini-3.1-flash-lite
+      try {
+        const fbRes = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: cleanMime,
+                    data: cleanBase64,
+                  },
+                },
+                {
+                  text: 'Transcris fidèlement ce message audio en texte brut.',
+                },
+              ],
+            },
+          ],
+        });
+        const fbText = fbRes?.text?.trim() || '';
+        return res.json({ success: true, text: fbText });
+      } catch (fbErr: any) {
+        return res.status(500).json({ 
+          success: false, 
+          error: `Erreur transcription: ${modelErr?.message || fbErr?.message}` 
+        });
+      }
+    }
+  } catch (err: any) {
+    console.error('Audio transcribe error:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Erreur lors du traitement audio' });
+  }
+});
+
+// ====================================================================
+// --- PRODUCTION REST API WITH RBAC FOR ALL PM ENTITIES ---
+// ====================================================================
+
+// 1. Get Schema SQL definition
+app.get('/api/schema/sql', (req: Request, res: Response) => {
+  try {
+    const schemaPath = path.join(process.cwd(), 'src', 'db', 'schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      const sql = fs.readFileSync(schemaPath, 'utf8');
+      return res.json({ success: true, sql });
+    }
+    return res.status(404).json({ error: 'Fichier schema.sql introuvable' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Portfolio Consolidated Analytics
+app.get('/api/portfolio/summary', (req: Request, res: Response) => {
+  const projects = dbStore.getAllProjects();
+  let totalBAC = 0;
+  let totalPV = 0;
+  let totalEV = 0;
+  let totalAC = 0;
+  let totalTasks = 0;
+  let completedTasks = 0;
+  let criticalRisks = 0;
+
+  projects.forEach((p) => {
+    totalBAC += p.totalBudget || 0;
+    totalTasks += p.tasks?.length || 0;
+    completedTasks += p.tasks?.filter((t) => t.status === 'DONE').length || 0;
+    criticalRisks += p.risks?.filter((r) => r.probability * r.impact >= 15).length || 0;
+    
+    p.tasks?.forEach((t) => {
+      const pv = t.costEstimated || 0;
+      const ac = t.costActual || 0;
+      const ev = (pv * (t.completionPercent || 0)) / 100;
+      totalPV += pv;
+      totalAC += ac;
+      totalEV += ev;
+    });
+  });
+
+  const portfolioCPI = totalAC > 0 ? parseFloat((totalEV / totalAC).toFixed(3)) : 1.0;
+  const portfolioSPI = totalPV > 0 ? parseFloat((totalEV / totalPV).toFixed(3)) : 1.0;
+
+  res.json({
+    success: true,
+    totalProjects: projects.length,
+    totalBAC,
+    totalPV,
+    totalEV,
+    totalAC,
+    portfolioCPI,
+    portfolioSPI,
+    costVarianceCV: totalEV - totalAC,
+    scheduleVarianceSV: totalEV - totalPV,
+    totalTasks,
+    completedTasks,
+    criticalRisks,
+    projectsSummary: projects.map((p) => ({
+      id: p.id,
+      code: p.code,
+      name: p.name,
+      client: p.client,
+      status: p.status,
+      totalBudget: p.totalBudget,
+      tasksCount: p.tasks?.length || 0,
+      membersCount: p.members?.length || 0,
+    })),
+  });
+});
+
+// 3. Projects Endpoints (CRUD)
+app.get('/api/projects', (req: Request, res: Response) => {
+  const projects = dbStore.getAllProjects();
+  res.json({ success: true, count: projects.length, data: projects });
+});
+
+app.get('/api/projects/:id', (req: Request, res: Response) => {
+  const project = dbStore.getProjectById(req.params.id);
+  if (!project) {
+    return res.status(404).json({ error: 'Projet introuvable.' });
+  }
+  res.json({ success: true, data: project });
+});
+
+// CREATE PROJECT — Restricted to DIRECTEUR_PROJETS and ADMINISTRATEUR
+app.post('/api/projects', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  if (!RBAC.canCreateOrDeleteProject(user.role || 'DIRECTEUR_PROJETS')) {
+    return res.status(403).json({
+      error: 'Accès refusé : Seul le Directeur de Projets ou l’Administrateur est habilité à initialiser de nouveaux projets.',
+      requiredRole: 'DIRECTEUR_PROJETS',
+      userRole: user.role,
+    });
+  }
+
+  const projectPayload = req.body;
+  if (!projectPayload.name || !projectPayload.code) {
+    return res.status(400).json({ error: 'Nom et code du projet requis.' });
+  }
+
+  const created = dbStore.createProject(
+    {
+      id: projectPayload.id || `proj-${Date.now()}`,
+      code: projectPayload.code,
+      name: projectPayload.name,
+      description: projectPayload.description || '',
+      client: projectPayload.client || 'Direction Générale',
+      managerName: projectPayload.managerName || user.displayName,
+      status: projectPayload.status || 'PLANNING',
+      priority: projectPayload.priority || 'HIGH',
+      methodology: projectPayload.methodology || 'HYBRID',
+      startDate: projectPayload.startDate || new Date().toISOString().split('T')[0],
+      endDate: projectPayload.endDate || new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+      totalBudget: Number(projectPayload.totalBudget || projectPayload.budgetBAC) || 100000,
+      currency: projectPayload.currency || 'EUR',
+      members: projectPayload.members || [],
+      tasks: projectPayload.tasks || [],
+      milestones: projectPayload.milestones || [],
+      risks: projectPayload.risks || [],
+      kpiWidgets: projectPayload.kpiWidgets || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    user
+  );
+
+  res.status(201).json({ success: true, data: created });
+});
+
+// UPDATE PROJECT
+app.put('/api/projects/:id', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const updated = dbStore.updateProject(req.params.id, req.body, user);
+  if (!updated) {
+    return res.status(404).json({ error: 'Projet introuvable.' });
+  }
+  res.json({ success: true, data: updated });
+});
+
+// DELETE PROJECT — Restricted to DIRECTEUR_PROJETS and ADMINISTRATEUR
+app.delete('/api/projects/:id', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  if (!RBAC.canCreateOrDeleteProject(user.role || 'DIRECTEUR_PROJETS')) {
+    return res.status(403).json({
+      error: 'Accès refusé : Seul le Directeur de Projets ou l’Administrateur peut supprimer ou clôturer définitivement un projet.',
+      requiredRole: 'DIRECTEUR_PROJETS',
+      userRole: user.role,
+    });
+  }
+
+  const success = dbStore.deleteProject(req.params.id, user);
+  if (!success) {
+    return res.status(404).json({ error: 'Projet introuvable.' });
+  }
+  res.json({ success: true, message: 'Projet supprimé avec succès.' });
+});
+
+// 4. Tasks (WBS) Endpoints
+app.post('/api/projects/:id/tasks', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  if (!RBAC.canManageTasks(user.role || 'DIRECTEUR_PROJETS')) {
+    return res.status(403).json({ error: 'Droits insuffisants pour ajouter des tâches.' });
+  }
+
+  const taskPayload = req.body;
+  const task = dbStore.addTask(
+    req.params.id,
+    {
+      id: taskPayload.id || `tsk-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      projectId: req.params.id,
+      title: taskPayload.title || 'Nouvelle tâche',
+      description: taskPayload.description,
+      status: taskPayload.status || 'TODO',
+      priority: taskPayload.priority || 'MEDIUM',
+      assigneeId: taskPayload.assigneeId,
+      startDate: taskPayload.startDate || new Date().toISOString().split('T')[0],
+      dueDate: taskPayload.dueDate || taskPayload.endDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+      estimatedHours: Number(taskPayload.estimatedHours) || 20,
+      actualHours: Number(taskPayload.actualHours) || 0,
+      completionPercent: Number(taskPayload.completionPercent || taskPayload.progress) || 0,
+      costEstimated: Number(taskPayload.costEstimated || taskPayload.plannedCost) || 2000,
+      costActual: Number(taskPayload.costActual || taskPayload.actualCost) || 0,
+      category: taskPayload.category || 'Développement',
+      tags: taskPayload.tags || ['WBS'],
+      subtasks: taskPayload.subtasks || [],
+      predecessorIds: taskPayload.predecessorIds || taskPayload.dependencies || [],
+    },
+    user
+  );
+
+  if (!task) return res.status(404).json({ error: 'Projet introuvable.' });
+  res.status(201).json({ success: true, data: task });
+});
+
+app.put('/api/projects/:id/tasks/:taskId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const updated = dbStore.updateTask(req.params.id, req.params.taskId, req.body, user);
+  if (!updated) return res.status(404).json({ error: 'Tâche ou projet introuvable.' });
+  res.json({ success: true, data: updated });
+});
+
+app.delete('/api/projects/:id/tasks/:taskId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const success = dbStore.deleteTask(req.params.id, req.params.taskId, user);
+  if (!success) return res.status(404).json({ error: 'Tâche introuvable.' });
+  res.json({ success: true, message: 'Tâche supprimée.' });
+});
+
+// 5. Team Resources Endpoints — Restricted to DIRECTEUR_PROJETS and ADMINISTRATEUR
+app.post('/api/projects/:id/team', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  if (!RBAC.canManageResources(user.role || 'DIRECTEUR_PROJETS')) {
+    return res.status(403).json({
+      error: 'Accès refusé : Seul le Directeur de Projets est habilité à provisionner et allouer de nouvelles ressources humaines.',
+      requiredRole: 'DIRECTEUR_PROJETS',
+      userRole: user.role,
+    });
+  }
+
+  const memberPayload = req.body;
+  const member = dbStore.addTeamMember(
+    req.params.id,
+    {
+      id: memberPayload.id || `tm-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      name: memberPayload.name || 'Nouveau Collaborateur',
+      role: memberPayload.role || 'Consultant / Expert',
+      email: memberPayload.email || 'collaborateur@entreprise.fr',
+      hourlyRate: Number(memberPayload.hourlyRate || memberPayload.dailyRate) || 85,
+      maxWeeklyHours: Number(memberPayload.maxWeeklyHours || memberPayload.capacityHoursPerWeek) || 35,
+      avatarUrl: memberPayload.avatarUrl,
+      color: memberPayload.color || '#3b82f6',
+    },
+    user
+  );
+
+  if (!member) return res.status(404).json({ error: 'Projet introuvable.' });
+  res.status(201).json({ success: true, data: member });
+});
+
+app.put('/api/projects/:id/team/:memberId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  if (!RBAC.canManageResources(user.role || 'DIRECTEUR_PROJETS')) {
+    return res.status(403).json({
+      error: 'Accès refusé : Seul le Directeur de Projets peut modifier les TJM et allocations de ressources.',
+      requiredRole: 'DIRECTEUR_PROJETS',
+    });
+  }
+
+  const updated = dbStore.updateTeamMember(req.params.id, req.params.memberId, req.body, user);
+  if (!updated) return res.status(404).json({ error: 'Membre ou projet introuvable.' });
+  res.json({ success: true, data: updated });
+});
+
+app.delete('/api/projects/:id/team/:memberId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  if (!RBAC.canManageResources(user.role || 'DIRECTEUR_PROJETS')) {
+    return res.status(403).json({
+      error: 'Accès refusé : Seul le Directeur de Projets peut libérer/supprimer des ressources affectées.',
+      requiredRole: 'DIRECTEUR_PROJETS',
+    });
+  }
+
+  const success = dbStore.deleteTeamMember(req.params.id, req.params.memberId, user);
+  if (!success) return res.status(404).json({ error: 'Membre introuvable.' });
+  res.json({ success: true, message: 'Ressource retirée.' });
+});
+
+// 6. Risks Management Endpoints
+app.post('/api/projects/:id/risks', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const riskPayload = req.body;
+  const prob = Number(riskPayload.probability) || 3;
+  const imp = Number(riskPayload.impact) || 3;
+
+  const risk = dbStore.addRisk(
+    req.params.id,
+    {
+      id: riskPayload.id || `rsk-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      projectId: req.params.id,
+      title: riskPayload.title || 'Nouveau Risque',
+      description: riskPayload.description || '',
+      category: riskPayload.category || 'TECHNIQUE',
+      probability: prob,
+      impact: imp,
+      status: riskPayload.status || 'ACTIVE',
+      mitigationPlan: riskPayload.mitigationPlan || 'Surveillance hebdomadaire et points de contrôle.',
+      contingencyPlan: riskPayload.contingencyPlan,
+      ownerId: riskPayload.ownerId,
+      financialImpact: Number(riskPayload.financialImpact) || 0,
+      identifiedDate: riskPayload.identifiedDate || new Date().toISOString().split('T')[0],
+    },
+    user
+  );
+
+  if (!risk) return res.status(404).json({ error: 'Projet introuvable.' });
+  res.status(201).json({ success: true, data: risk });
+});
+
+app.put('/api/projects/:id/risks/:riskId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const updated = dbStore.updateRisk(req.params.id, req.params.riskId, req.body, user);
+  if (!updated) return res.status(404).json({ error: 'Risque ou projet introuvable.' });
+  res.json({ success: true, data: updated });
+});
+
+app.delete('/api/projects/:id/risks/:riskId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const success = dbStore.deleteRisk(req.params.id, req.params.riskId, user);
+  if (!success) return res.status(404).json({ error: 'Risque introuvable.' });
+  res.json({ success: true, message: 'Risque supprimé.' });
+});
+
+// 7. Milestones Endpoints
+app.post('/api/projects/:id/milestones', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const mPayload = req.body;
+  const milestone = dbStore.addMilestone(
+    req.params.id,
+    {
+      id: mPayload.id || `ms-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      projectId: req.params.id,
+      title: mPayload.title || 'Nouveau Jalon',
+      targetDate: mPayload.targetDate || mPayload.date || new Date().toISOString().split('T')[0],
+      completed: Boolean(mPayload.completed),
+      description: mPayload.description,
+      deliverable: mPayload.deliverable || 'Livrable contractuel',
+    },
+    user
+  );
+
+  if (!milestone) return res.status(404).json({ error: 'Projet introuvable.' });
+  res.status(201).json({ success: true, data: milestone });
+});
+
+app.put('/api/projects/:id/milestones/:mId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const updated = dbStore.updateMilestone(req.params.id, req.params.mId, req.body, user);
+  if (!updated) return res.status(404).json({ error: 'Jalon introuvable.' });
+  res.json({ success: true, data: updated });
+});
+
+app.delete('/api/projects/:id/milestones/:mId', (req: Request, res: Response) => {
+  const user = getUserFromRequest(req);
+  const success = dbStore.deleteMilestone(req.params.id, req.params.mId, user);
+  if (!success) return res.status(404).json({ error: 'Jalon introuvable.' });
+  res.json({ success: true, message: 'Jalon supprimé.' });
+});
+
+// 8. Audit Logs Endpoint
+app.get('/api/audit-logs', (req: Request, res: Response) => {
+  const logs = dbStore.getAuditLogs(100);
+  res.json({ success: true, count: logs.length, data: logs });
+});
+
+
+
+// API: PM AI Diagnostic & Audit
+app.post('/api/pm-ai/audit', async (req: Request, res: Response) => {
+  const { projectData } = req.body;
+  if (!projectData) {
+    return res.status(400).json({ error: 'Données du projet manquantes.' });
+  }
+
+  // Dynamic Rule-Based PM Engine Fallback (based on real PMBOK & EVM metrics)
+  const generateDynamicPMAudit = (data: any) => {
+    const spi = Number(data.spi) || 1.0;
+    const cpi = Number(data.cpi) || 1.0;
+    const progress = Number(data.progress) || 0;
+    const activeRisks = Number(data.activeRisksCount) || 0;
+    const overdueTasks = Number(data.overdueTasksCount) || 0;
+
+    let healthScoreEstimate = 85;
+    if (spi < 0.9) healthScoreEstimate -= 15;
+    if (cpi < 0.9) healthScoreEstimate -= 15;
+    if (activeRisks > 2) healthScoreEstimate -= 10;
+    if (overdueTasks > 0) healthScoreEstimate -= 10;
+    healthScoreEstimate = Math.max(20, Math.min(100, healthScoreEstimate));
+
+    const strengths: string[] = [];
+    const alerts: string[] = [];
+    const recommendations: string[] = [];
+
+    // Evaluate SPI
+    if (spi >= 1.0) {
+      strengths.push(`Indice des délais favorable (SPI = ${spi.toFixed(2)}) : l'avancement respecte le planning initial.`);
+    } else {
+      alerts.push(`Retard sur le calendrier (SPI = ${spi.toFixed(2)}) : la valeur acquise est inférieure au planning prévu.`);
+      recommendations.push("Réexaminer le chemin critique et affecter des ressources prioritaires sur les tâches bloquantes (Fast-tracking).");
+    }
+
+    // Evaluate CPI
+    if (cpi >= 1.0) {
+      strengths.push(`Efficacité budgétaire maîtrisée (CPI = ${cpi.toFixed(2)}) : les coûts réels restent inférieurs au budget alloué.`);
+    } else {
+      alerts.push(`Dépassement budgétaire identifié (CPI = ${cpi.toFixed(2)}) : surcoût par rapport à la valeur livrée.`);
+      recommendations.push("Auditer les charges réelles et geler les dépenses non indispensables jusqu'au prochain jalon.");
+    }
+
+    // Evaluate Progress & Tasks
+    if (progress > 50) {
+      strengths.push(`Maturité du projet confirmée avec ${progress}% des livrables complétés.`);
+    }
+    if (overdueTasks > 0) {
+      alerts.push(`${overdueTasks} tâche(s) ont dépassé leur date limite de livraison.`);
+      recommendations.push("Organiser une réunion de déblocage opérationnelle d'urgence avec les responsables de lots.");
+    }
+
+    // Evaluate Risks
+    if (activeRisks > 0) {
+      alerts.push(`${activeRisks} risque(s) critique(s) identifié(s) dans la matrice ISO 31000.`);
+      recommendations.push("Activer immédiatement les plans de contingence pour les risques à sévérité élevée (score ≥ 15).");
+    } else {
+      strengths.push("Faible exposition aux risques critiques à ce stade du cycle de vie.");
+    }
+
+    if (recommendations.length === 0) {
+      recommendations.push("Maintenir la cadence des revues de sprint hebdomadaires et sécuriser la validation des livrables finaux.");
+    }
+
+    let summary = `Le projet "${data.name || 'Projet'}" affiche un avancement de ${progress}%. `;
+    if (spi >= 0.95 && cpi >= 0.95) {
+      summary += "La trajectoire globale est saine avec un bon équilibre entre respect du calendrier et maîtrise financière.";
+    } else if (spi < 0.95 && cpi < 0.95) {
+      summary += "Le projet traverse une zone de tension conjuguant dérive des délais et surcoût. Une action corrective immédiate est requise.";
+    } else if (spi < 0.95) {
+      summary += "Le projet accuse un retard calendaire qu'il convient de résorber en priorisant les jalons sur le chemin critique.";
+    } else {
+      summary += "Les délais sont sous contrôle mais la cadence des dépenses nécessite une vigilance budgétaire accrue.";
+    }
+
+    return {
+      summary,
+      healthScoreEstimate,
+      strengths,
+      alerts,
+      recommendations,
+      criticalPathAdvice: "Vérifier l'alignement des jalons majeurs et minimiser les flottements sur les tâches du chemin critique."
+    };
+  };
+
+  const prompt = `Tu es un Directeur de Projet Senior / PMO certifié PMP et Agile.
+Analyse les données du projet suivant en français et génère un audit de performance approfondi, des alertes de dérive (délais, budget, SPI/CPI), et des recommandations stratégiques concrètes.
+
+Données du projet :
+${JSON.stringify(projectData, null, 2)}
+
+Réponds impérativement au format JSON valide avec la structure suivante :
+{
+  "summary": "Synthèse globale de la santé du projet (2-3 phrases percutantes)",
+  "healthScoreEstimate": 85,
+  "strengths": ["point fort 1", "point fort 2"],
+  "alerts": ["alerte 1 sur les risques/délais", "alerte 2 sur le budget ou la vélocité"],
+  "recommendations": ["action corrective 1", "action corrective 2", "action corrective 3"],
+  "criticalPathAdvice": "Conseil spécifique pour optimiser le chemin critique et les jalons"
+}`;
+
+  const text = await callGeminiResilient({ prompt, isJson: true });
+  if (text) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.summary) {
+        return res.json(parsed);
+      }
+    } catch (_e) {
+      // Fall through to algorithmic audit
+    }
+  }
+
+  return res.json(generateDynamicPMAudit(projectData));
+});
+
+// API: PM AI Flash Report (Compte-rendu Comité de Pilotage COPIL)
+app.post('/api/pm-ai/copil-report', async (req: Request, res: Response) => {
+  const { projectData, audience = 'COPIL' } = req.body;
+
+  const generateDynamicCopilReport = (data: any, aud: string) => {
+    const spi = Number(data?.spi) || 1.0;
+    const cpi = Number(data?.cpi) || 1.0;
+    const progress = Number(data?.progress) || 0;
+    const status = data?.status || 'IN_PROGRESS';
+    const totalBudget = Number(data?.totalBudget) || 0;
+    const spentBudget = Number(data?.spentBudget) || 0;
+    const completedTasks = Number(data?.completedTasksCount) || 0;
+    const totalTasks = Number(data?.totalTasksCount) || 0;
+    const activeRisks = Number(data?.activeRisksCount) || 0;
+
+    const weatherEmoji = (spi >= 0.95 && cpi >= 0.95) ? '🟢 Météo Favorable' : (spi < 0.9 && cpi < 0.9) ? '🔴 Météo Tempétueuse (Alerte)' : '🟠 Météo Variable';
+
+    return `## 📌 Flash Report Exécutif - ${data?.name || 'Projet'}
+**Destinataire :** ${aud}  
+**Date du rapport :** ${new Date().toLocaleDateString('fr-FR')}  
+**Météo Globale :** ${weatherEmoji} (${status})
+
+---
+
+### 1. 🎯 Synthèse Exécutive
+Le projet affiche un taux d'avancement global de **${progress}%** avec **${completedTasks}/${totalTasks}** tâches d'ores et déjà clôturées. L'équipe reste mobilisée sur les phases de conception et de recette.
+
+### 2. 📊 Indicateurs de Performance & Analyse EVM
+- **SPI (Performance Délais) :** \`${spi.toFixed(2)}\` ${spi >= 1 ? '*(Conforme au calendrier)*' : '*(Léger décalage à résorber)*'}
+- **CPI (Performance Coûts) :** \`${cpi.toFixed(2)}\` ${cpi >= 1 ? '*(Dépenses maîtrisées)*' : '*(Surveillance budgétaire requise)*'}
+- **Budget Alloué (BAC) :** ${totalBudget.toLocaleString('fr-FR')} €
+- **Coûts Réels Engagés (AC) :** ${spentBudget.toLocaleString('fr-FR')} € *(Reste à dépenser : ${(totalBudget - spentBudget).toLocaleString('fr-FR')} €)*
+
+### 3. ⚠️ Risques Clés & Points d'Attention
+- **${activeRisks} risque(s) actif(s)** sous revue dans le registre opérationnel.
+- Priorité accordée à la stabilisation des dépendances et au respect des jalons du chemin critique.
+
+### 4. 🚀 Décisions Requises & Prochaines Échéances (S+2)
+1. Validation formelle du jalon d'étape par le commanditaire.
+2. Arbitrage sur l'allocation des compétences pour les développements finaux.
+3. Préparation de la phase de recette utilisateur et de déploiement.
+`;
+  };
+
+  const prompt = `Tu es un Chef de Projet d'Excellence. Rédige un Flash Report exécutif structuré en Markdown pour le ${audience} concernant le projet :
+Nom du projet : ${projectData?.name}
+Objectif : ${projectData?.description || 'N/A'}
+Statut : ${projectData?.status}
+Avancement : ${projectData?.progress}%
+Budget total : ${projectData?.totalBudget} € | Dépensé : ${projectData?.spentBudget} €
+Tâches terminées : ${projectData?.completedTasksCount}/${projectData?.totalTasksCount}
+Nombre de risques actifs : ${projectData?.activeRisksCount || 0}
+
+Le rapport doit être professionnel, clair, avec des sections :
+1. Synthèse Exécutive (Météo du projet)
+2. Avancement des Jalons Majeurs
+3. Analyse Financière & Respect des Délais (EVM / SPI / CPI)
+4. Risques Majeurs & Plans d'Atténuation
+5. Décisions requises du Comité / Arbitrages
+
+Sois précis, dynamique et orienté résultats.`;
+
+  const report = await callGeminiResilient({ prompt });
+  if (report) {
+    return res.json({ reportMarkdown: report });
+  }
+
+  return res.json({ reportMarkdown: generateDynamicCopilReport(projectData, audience) });
+});
+
+// API: PM AI WBS Task Decomposition
+app.post('/api/pm-ai/wbs-breakdown', async (req: Request, res: Response) => {
+  const { objective, projectContext } = req.body;
+
+  const generateDynamicWBS = (obj: string) => {
+    return [
+      { title: `Cadrage et spécifications détaillées : ${obj}`, category: 'Cadrage', estimatedHours: 16, priority: 'HIGH', description: 'Définition du périmètre et validation des exigences' },
+      { title: `Conception d'architecture et prototypage`, category: 'Conception', estimatedHours: 24, priority: 'HIGH', description: 'Spécifications techniques et validation UX/UI' },
+      { title: `Implémentation technique & développements`, category: 'Développement', estimatedHours: 40, priority: 'MEDIUM', description: 'Développement des fonctionnalités principales' },
+      { title: `Tests d'intégration et recette fonctionnelle`, category: 'Recette', estimatedHours: 20, priority: 'HIGH', description: 'Plan de test et correction des anomalies' },
+      { title: `Déploiement en production & conduite du changement`, category: 'Déploiement', estimatedHours: 12, priority: 'LOW', description: 'Mise en ligne, documentation et formation' },
+    ];
+  };
+
+  const prompt = `Tu es un expert en gestion de projet (WBS / Work Breakdown Structure).
+Décompose l'objectif suivant en 5 à 7 tâches concrètes et mesurables pour un chef de projet.
+Objectif : "${objective}"
+Contexte du projet : "${projectContext || 'Standard'}"
+
+Format JSON attendu :
+{
+  "tasks": [
+    {
+      "title": "Nom de la tâche d'action claire",
+      "category": "Catégorie (Cadrage / Conception / Développpement / Recette / Déploiement / Gouvernance)",
+      "estimatedHours": 20,
+      "priority": "HIGH" | "MEDIUM" | "LOW",
+      "description": "Courte description du livrable attendu"
+    }
+  ]
+}`;
+
+  const text = await callGeminiResilient({ prompt, isJson: true });
+  if (text) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
+        return res.json(parsed);
+      }
+    } catch (_e) {
+      // Fall through to algorithmic WBS
+    }
+  }
+
+  return res.json({ tasks: generateDynamicWBS(objective || 'Nouveau Lot') });
+});
+
+// API: ProdPilot AI — Extract MEP & Project records from raw text / spreadsheet JSON
+app.post('/api/pm-ai/parse-mep', async (req: Request, res: Response) => {
+  const { sourceText } = req.body || {};
+  const raw = String(sourceText || '').trim();
+  if (!raw) {
+    return res.status(400).json({ success: false, error: 'Source vide.' });
+  }
+
+  const schemaExample = {
+    mep: [
+      {
+        project: 'Nom du projet',
+        title: 'Application / intitulé de la MEP',
+        version: 'Version',
+        date: '2026-12-15T22:00',
+        owner: 'Responsable MEP',
+        environment: 'Production',
+        status: 'Brouillon',
+        priority: 'Normale',
+        goNoGo: 'En attente',
+        changeNumbers: 'CHG0000000',
+        ritmNumbers: 'RITM0000000',
+        rollback: 'Plan de retour arrière',
+        description: 'Périmètre et procédure',
+        people: [{ name: 'Prénom Nom', role: 'Rôle' }],
+        tasks: [
+          {
+            title: 'Validation recette',
+            kind: 'Jalon',
+            assignee: 'Prénom Nom',
+            offset: -5,
+            duration: 1,
+            status: 'À faire',
+            notes: '',
+          },
+        ],
+      },
+    ],
+  };
+
+  const prompt = `Tu es un assistant senior de gestion de mise en production et de pilotage de projets IT. Analyse les données ci-dessous et prépare toutes les fiches projet/MEP réellement identifiables.
+
+RÈGLES STRICTES :
+- N'invente aucune information, date, personne, référence ServiceNow, version ou décision.
+- Si une donnée manque, utilise une chaîne vide et signale-la dans "missingFields".
+- Conserve exactement les références CHG et RITM trouvées dans la source.
+- Distingue le nom du projet de l'application ou de l'intitulé de la MEP.
+- Convertis les dates connues en ISO 8601 local YYYY-MM-DDTHH:mm ; si l'heure est inconnue, utilise 00:00.
+- Réponds UNIQUEMENT avec un JSON valide, conforme à ce schéma : ${JSON.stringify(schemaExample)}
+
+DONNÉES À ANALYSER :
+${raw.slice(0, 24000)}`;
+
+  const aiResponse = await callGeminiResilient({ prompt, isJson: true });
+  if (aiResponse) {
+    try {
+      const cleaned = aiResponse.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(cleaned);
+      if (parsed && (Array.isArray(parsed.mep) || Array.isArray(parsed))) {
+        return res.json({ success: true, data: Array.isArray(parsed) ? { mep: parsed } : parsed, provider: 'GEMINI' });
+      }
+    } catch (_e) {
+      // Fall back to deterministic extraction below
+    }
+  }
+
+  // Deterministic extraction fallback when API key isn't configured
+  try {
+    const maybeJson = JSON.parse(raw);
+    if (Array.isArray(maybeJson?.rows) && maybeJson.rows.length > 0) {
+      const extracted = maybeJson.rows.slice(0, 20).map((row: Record<string, any>, idx: number) => {
+        const vals = Object.entries(row);
+        const findVal = (keys: string[]) => {
+          const hit = vals.find(([k]) => keys.some((needle) => k.toLowerCase().includes(needle)));
+          return hit ? String(hit[1] || '').trim() : '';
+        };
+        const project = findVal(['projet', 'project']) || 'Projet importé';
+        const title = findVal(['titre', 'title', 'app', 'intitul', 'libell', 'mep']) || `MEP ${idx + 1}`;
+        const rawDate = findVal(['date', 'fenetre', 'window', 'echeance']);
+        const isoMatch = rawDate.match(/\d{4}-\d{2}-\d{2}/);
+        const date = isoMatch ? `${isoMatch[0]}T22:00` : `${new Date(Date.now() + (idx + 3) * 86400000).toISOString().slice(0, 10)}T22:00`;
+        const owner = findVal(['resp', 'owner', 'pilote', 'cpp', 'chef']) || 'À affecter';
+        const chg = findVal(['chg', 'change', 'snow']) || (raw.match(/CHG\d{4,10}/i)?.[0] || '');
+        const ritm = findVal(['ritm']) || (raw.match(/RITM\d{4,10}/i)?.[0] || '');
+        const version = findVal(['vers', 'tag']) || '';
+        return {
+          project,
+          title,
+          version,
+          date,
+          owner,
+          environment: 'Production',
+          status: 'Brouillon',
+          priority: 'Normale',
+          goNoGo: 'En attente',
+          changeNumbers: chg,
+          ritmNumbers: ritm,
+          rollback: '',
+          description: Object.values(row).filter(Boolean).join(' · ').slice(0, 240),
+          people: owner !== 'À affecter' ? [{ name: owner, role: 'Responsable MEP' }] : [],
+          tasks: [],
+        };
+      });
+      return res.json({ success: true, data: { mep: extracted }, provider: 'PARSER' });
+    }
+  } catch (_e) {
+    // Not spreadsheet JSON; extract from free text
+  }
+
+  const chgMatches = raw.match(/CHG\d{4,10}/gi) || [];
+  const ritmMatches = raw.match(/RITM\d{4,10}/gi) || [];
+  const dateMatch = raw.match(/(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2}))?/);
+  const firstLine = raw.split('\n').map((l) => l.trim()).find(Boolean) || 'Nouvelle MEP extraite';
+  const fallbackMep = {
+    mep: [
+      {
+        project: 'Projet identifié',
+        title: firstLine.slice(0, 80),
+        version: raw.match(/v\d+\.\d+(?:\.\d+)?/i)?.[0] || '',
+        date: dateMatch ? `${dateMatch[1]}T${dateMatch[2] || '22:00'}` : `${new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10)}T22:00`,
+        owner: 'Responsable à confirmer',
+        environment: 'Production',
+        status: 'Brouillon',
+        priority: /critique|urgent|p1/i.test(raw) ? 'Critique' : 'Normale',
+        goNoGo: 'En attente',
+        changeNumbers: [...new Set(chgMatches)].join(', '),
+        ritmNumbers: [...new Set(ritmMatches)].join(', '),
+        rollback: '',
+        description: raw.slice(0, 400),
+        people: [],
+        tasks: [],
+      },
+    ],
+  };
+
+  return res.json({ success: true, data: fallbackMep, provider: 'PARSER' });
+});
+
+// Copilot Studio Direct Line In-Memory Session (Server-side bridge for ProdPilot Assistant)
+let copilotDirectLineSession: {
+  token: string;
+  conversationId: string;
+  expiresIn: number;
+  watermark: string | null;
+  userId: string;
+} | null = null;
+
+function validateCopilotEndpointUrl(raw: string): string {
+  const u = new URL(String(raw || ''));
+  const h = u.hostname.toLowerCase();
+  if (
+    u.protocol !== 'https:' ||
+    !(
+      h.endsWith('.environment.api.powerplatform.com') ||
+      h === 'environment.api.powerplatform.com' ||
+      h.endsWith('.powerva.microsoft.com') ||
+      h === 'powerva.microsoft.com'
+    )
+  ) {
+    throw new Error('Endpoint invalide. Utilisez le Token Endpoint officiel Copilot Studio (canal Application mobile).');
+  }
+  return u.toString();
+}
+
+app.post('/api/copilot/directline/connect', async (req: Request, res: Response) => {
+  try {
+    const raw = String(req.body?.endpoint || '').trim();
+    if (!raw) {
+      return res.status(400).json({ success: false, error: 'Renseignez le Token Endpoint Copilot Studio.' });
+    }
+    if (raw.includes('/copilotstudio/agenticruntime/')) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Cette URL est la chaîne de connexion Microsoft 365 Agents SDK (Agentic Runtime), pas un Token Endpoint Direct Line. Utilisez le Token Endpoint du canal Application mobile ou le bouton d’analyse IA intégrée.',
+      });
+    }
+    const endpoint = validateCopilotEndpointUrl(raw);
+    const tokenResp = await fetch(endpoint, { method: 'GET', headers: { Accept: 'application/json' } });
+    if (!tokenResp.ok) {
+      return res.status(400).json({
+        success: false,
+        error: `Copilot Studio : erreur ${tokenResp.status}. Vérifiez l’endpoint et le canal Mobile app.`,
+      });
+    }
+    const tokenData: any = await tokenResp.json();
+    if (!tokenData?.token) {
+      return res.status(400).json({ success: false, error: 'Le Token Endpoint n’a retourné aucun jeton Direct Line.' });
+    }
+    const startResp = await fetch('https://directline.botframework.com/v3/directline/conversations', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenData.token}`, Accept: 'application/json' },
+    });
+    if (!startResp.ok) {
+      return res.status(400).json({ success: false, error: `Impossible de démarrer Direct Line (${startResp.status}).` });
+    }
+    const conversation: any = await startResp.json();
+    if (!conversation?.conversationId) {
+      return res.status(400).json({ success: false, error: 'Direct Line n’a pas retourné de conversationId.' });
+    }
+    copilotDirectLineSession = {
+      token: tokenData.token,
+      conversationId: conversation.conversationId,
+      expiresIn: Number(tokenData.expires_in || 3600),
+      watermark: null,
+      userId: `prodpilot-${Date.now()}`,
+    };
+    return res.json({
+      success: true,
+      connected: true,
+      conversationId: conversation.conversationId,
+      expiresIn: copilotDirectLineSession.expiresIn,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err?.message || 'Erreur de connexion Copilot Studio.' });
+  }
+});
+
+app.post('/api/copilot/directline/send', async (req: Request, res: Response) => {
+  try {
+    if (!copilotDirectLineSession) {
+      return res.status(400).json({ success: false, error: 'Copilot n’est pas connecté.' });
+    }
+    const message = String(req.body?.text || '');
+    if (message.length > 100000) {
+      return res.status(400).json({ success: false, error: 'Message trop volumineux (maximum 100 000 caractères).' });
+    }
+    const body = { type: 'message', from: { id: copilotDirectLineSession.userId, name: 'Clarity ProdPilot' }, text: message, textFormat: 'plain' };
+    const url = `https://directline.botframework.com/v3/directline/conversations/${encodeURIComponent(copilotDirectLineSession.conversationId)}/activities`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${copilotDirectLineSession.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      return res.status(400).json({ success: false, error: `Envoi Copilot impossible (${r.status}). Reconnectez l’agent.` });
+    }
+    const data = await r.json();
+    return res.json({ success: true, data });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err?.message || 'Erreur envoi Copilot.' });
+  }
+});
+
+app.get('/api/copilot/directline/poll', async (_req: Request, res: Response) => {
+  try {
+    if (!copilotDirectLineSession) {
+      return res.status(400).json({ success: false, error: 'Copilot n’est pas connecté.' });
+    }
+    const base = `https://directline.botframework.com/v3/directline/conversations/${encodeURIComponent(copilotDirectLineSession.conversationId)}/activities`;
+    const url = base + (copilotDirectLineSession.watermark ? `?watermark=${encodeURIComponent(copilotDirectLineSession.watermark)}` : '');
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${copilotDirectLineSession.token}`, Accept: 'application/json' },
+    });
+    if (!r.ok) {
+      return res.status(400).json({ success: false, error: `Lecture Copilot impossible (${r.status}).` });
+    }
+    const data: any = await r.json();
+    if (data.watermark) copilotDirectLineSession.watermark = data.watermark;
+    const activities = (data.activities || []).filter(
+      (a: any) =>
+        a.type === 'message' &&
+        a.from?.id !== copilotDirectLineSession?.userId &&
+        ((a.text && a.text.trim()) || (a.attachments && a.attachments.length))
+    );
+    return res.json({ success: true, activities });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err?.message || 'Erreur lecture Copilot.' });
+  }
+});
+
+app.post('/api/copilot/directline/disconnect', (_req: Request, res: Response) => {
+  copilotDirectLineSession = null;
+  res.json({ success: true, connected: false });
+});
+
+// Vite middleware & Static Serving
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req: Request, res: Response) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  // Do not start the HTTP server until PostgreSQL is reachable and the auth schema exists.
+  // Compose also gates this service on db-credentials-sync; retries cover short DB restarts.
+  let lastDatabaseError: unknown;
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      await ensureAuthSchema();
+      lastDatabaseError = undefined;
+      break;
+    } catch (error) {
+      lastDatabaseError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[startup] PostgreSQL/schema check failed (${attempt}/10): ${message}`);
+      if (attempt < 10) await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * attempt, 10000)));
+    }
+  }
+  if (lastDatabaseError) throw lastDatabaseError;
+
+  app.listen(Number(process.env.PORT || PORT), '0.0.0.0', () => {
+    console.log(`Clarity PM listening on port ${process.env.PORT || PORT}`);
+  });
+}
+
+startServer().catch((error) => { console.error('Clarity PM startup failed:', error); process.exit(1); });
