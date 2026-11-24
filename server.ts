@@ -400,6 +400,79 @@ app.post('/api/admin/copilot/test', async (req: Request, res: Response) => {
   res.json({success:true,message:'Réponse du fournisseur IA reçue.',model,reply:reply.trim(),latencyMs,timestamp:new Date().toISOString()});
 });
 
+
+/**
+ * Meeting audio is captured explicitly by the user's browser and sent to the
+ * private Whisper service on this VPS. No audio is forwarded to Copilot or Graph.
+ */
+app.post('/api/meetings/transcribe', express.raw({ type: () => true, limit: '150mb' }), async (req: Request, res: Response) => {
+  const audio = req.body;
+  const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  const allowedTypes = ['audio/webm', 'video/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/mpeg'];
+  if (!Buffer.isBuffer(audio) || audio.length < 1024) return res.status(400).json({ success: false, error: 'Fichier audio absent ou trop court.' });
+  if (!allowedTypes.includes(mimeType)) return res.status(415).json({ success: false, error: 'Format audio non pris en charge.' });
+  const whisperEndpoint = process.env.WHISPER_API_URL || 'http://whisper:9000/asr';
+  try {
+    const endpoint = new URL(whisperEndpoint);
+    if (!['http:', 'https:'].includes(endpoint.protocol)) throw new Error('WHISPER_API_URL invalide.');
+    endpoint.searchParams.set('task', 'transcribe');
+    endpoint.searchParams.set('language', 'fr');
+    endpoint.searchParams.set('output', 'json');
+    const form = new FormData();
+    form.append('audio_file', new Blob([audio], { type: mimeType }), mimeType.includes('mp4') ? 'meeting.mp4' : mimeType.includes('ogg') ? 'meeting.ogg' : mimeType.includes('wav') ? 'meeting.wav' : 'meeting.webm');
+    const response = await fetch(endpoint, { method: 'POST', body: form, signal: AbortSignal.timeout(45 * 60 * 1000) });
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 500);
+      return res.status(502).json({ success: false, error: `Le moteur Whisper est indisponible (HTTP ${response.status}). ${detail}` });
+    }
+    const payload: any = await response.json();
+    const transcript = String(payload.text || payload.transcription || '').trim();
+    if (!transcript) return res.status(422).json({ success: false, error: 'Whisper n’a détecté aucune parole.' });
+    res.json({ success: true, transcript, engine: 'faster-whisper', language: 'fr' });
+  } catch (error: any) {
+    console.error('Meeting transcription failed:', error);
+    const unavailable = error?.name === 'TimeoutError' || error?.cause?.code === 'ECONNREFUSED' || error?.cause?.code === 'ENOTFOUND';
+    res.status(unavailable ? 503 : 500).json({ success: false, error: unavailable ? 'Le service Whisper ne répond pas encore. Réessayez dans quelques instants.' : 'Erreur pendant la transcription audio.' });
+  }
+});
+
+app.post('/api/communications/draft', async (req: Request, res: Response) => {
+  const { mode, context, transcript = '' } = req.body || {};
+  if (!['mep-start', 'mep-end', 'coproj'].includes(mode)) return res.status(400).json({ success: false, error: 'Type de document invalide.' });
+  if (JSON.stringify(context ?? {}).length > 100000 || String(transcript).length > 250000) return res.status(413).json({ success: false, error: 'Le contexte transmis est trop volumineux.' });
+  if (mode === 'coproj' && String(transcript).trim().length < 20) return res.status(400).json({ success: false, error: 'Transcription insuffisante pour générer un CR.' });
+  if (mode !== 'coproj' && (!context?.mep || typeof context.mep !== 'object')) return res.status(400).json({ success: false, error: 'Contexte MEP manquant.' });
+  const instruction = mode === 'mep-start'
+    ? 'Rédige un e-mail professionnel de DÉBUT DE MEP destiné aux équipes projet et production. Mentionne le périmètre, le créneau, Change, RITM, intervenants, prérequis, déroulé, GO/NO-GO, risques et rollback uniquement si ces informations sont fournies.'
+    : mode === 'mep-end'
+      ? 'Rédige un e-mail professionnel de FIN DE MEP. Indique le résultat réel, les contrôles/tests, le retour au nominal, les incidents, réserves et actions restantes. N’annonce jamais un succès si le statut ne le confirme pas.'
+      : 'Rédige un compte rendu COPROJ fidèle à la transcription. Structure : objet, date et participants uniquement s’ils sont connus, synthèse, sujets abordés, décisions, actions avec responsable et échéance uniquement si explicitement cités, risques/alertes, points à arbitrer et prochaines étapes. Distingue les faits des hypothèses. N’invente aucun nom, décision, responsable ou délai.';
+  const prompt = `Tu es l’assistant de communication d’un chef de projet production. Réponds en français professionnel, clair, synthétique et prêt à relire. ${instruction}
+N’invente aucune information. Utilise « À confirmer » lorsqu’une information essentielle manque.
+Retourne exclusivement un JSON valide : {"subject":"...","body":"..."} ; body en texte brut avec paragraphes et listes.
+CONTEXTE PROJET / MEP :
+${JSON.stringify(context ?? {}, null, 2)}
+${mode === 'coproj' ? `TRANSCRIPTION INTÉGRALE :\n${String(transcript)}` : ''}`;
+  try {
+    const raw = await callGeminiResilient({ prompt, isJson: true });
+    if (!raw) return res.status(503).json({ success: false, error: 'Le service de génération IA est indisponible. Vérifiez GEMINI_API_KEY sur le VPS.' });
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    let parsed: any;
+    try { parsed = JSON.parse(cleaned); }
+    catch {
+      const subject = mode === 'coproj' ? 'Compte rendu COPROJ' : mode === 'mep-start' ? 'Début de MEP' : 'Fin de MEP';
+      parsed = { subject, body: raw };
+    }
+    const subject = String(parsed.subject || (mode === 'coproj' ? 'Compte rendu COPROJ' : 'Communication MEP')).slice(0, 300);
+    const body = String(parsed.body || '').slice(0, 50000);
+    if (!body.trim()) return res.status(502).json({ success: false, error: 'Le service IA a retourné un brouillon vide.' });
+    res.json({ success: true, subject, body });
+  } catch (error) {
+    console.error('Communication draft generation failed:', error);
+    res.status(500).json({ success: false, error: 'Impossible de générer le brouillon.' });
+  }
+});
+
 // API: Audio Transcription powered by model 'gemini-3.5-transcribe'
 app.post('/api/transcribe', async (req: Request, res: Response) => {
   try {
