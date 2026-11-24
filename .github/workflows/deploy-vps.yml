@@ -63,23 +63,28 @@ jobs:
           command -v docker >/dev/null 2>&1 || { echo "Docker is not installed." >&2; exit 1; }
           docker compose version >/dev/null 2>&1 || { echo "Docker Compose plugin is missing." >&2; exit 1; }
 
-          PARENT_DIR="$(dirname "$APP_DIR")"
-          mkdir -p "$PARENT_DIR"
+          mkdir -p "$(dirname "$APP_DIR")"
+          BACKUP_DIR=""
 
-          # Keep the existing directory instead of deleting user files.
-          # If it is not a Git checkout, move it aside and reuse its .env if present.
+          # Preserve any existing non-Git content, including the production .env.
           if [ -e "$APP_DIR" ] && [ ! -d "$APP_DIR/.git" ]; then
-            BACKUP_DIR="${APP_DIR}.predeploy.$(date +%Y%m%d%H%M%S)"
-            echo "Existing non-Git directory found; preserving it at: $BACKUP_DIR"
-            mv "$APP_DIR" "$BACKUP_DIR"
-            mkdir -p "$APP_DIR"
-            if [ -f "$BACKUP_DIR/.env" ]; then
-              install -m 600 "$BACKUP_DIR/.env" "$APP_DIR/.env"
+            if [ -n "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+              BACKUP_DIR="${APP_DIR}.predeploy.$(date +%Y%m%d%H%M%S)"
+              echo "Preserving existing directory at: $BACKUP_DIR"
+              mv "$APP_DIR" "$BACKUP_DIR"
+            else
+              rmdir "$APP_DIR"
             fi
           fi
 
+          # Clone only into a path that does not already exist.
           if [ ! -d "$APP_DIR/.git" ]; then
             git clone --no-checkout https://github.com/tunbest/clarity.git "$APP_DIR"
+          fi
+
+          # Restore the production environment file after the clone.
+          if [ -n "$BACKUP_DIR" ] && [ -f "$BACKUP_DIR/.env" ]; then
+            install -m 600 "$BACKUP_DIR/.env" "$APP_DIR/.env"
           fi
 
           cd "$APP_DIR"
