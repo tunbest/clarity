@@ -43,7 +43,6 @@ export type ProdPilotPage =
   | 'planning'
   | 'reports'
   | 'minutes'
-  | 'assistant'
   | 'settings';
 
 export type MepStatus =
@@ -1210,8 +1209,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     { id: 'kanban', label: 'Kanban', icon: FolderKanban },
     { id: 'planning', label: 'Planning & calendrier', icon: CalendarIcon },
     { id: 'reports', label: 'Reporting', icon: BarChart3 },
-    { id: 'minutes', label: 'Comptes rendus', icon: FileText },
-    { id: 'assistant', label: 'Assistant IA', icon: Sparkles, badge: 'IA' },
+    { id: 'minutes', label: 'Comptes rendus & mails', icon: FileText },
     { id: 'settings', label: 'Paramètres & sauvegarde', icon: Settings },
   ];
 
@@ -2302,6 +2300,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
          ===================================================================== */}
       {page === 'minutes' && (
         <div className="space-y-4">
+          <CommunicationAssistant projects={clarityProjects} meps={db.mep} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-black text-slate-900">Comptes rendus de réunion</h3>
@@ -2426,195 +2425,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               </div>
             );
           })()}
-        </div>
-      )}
-
-      {/* =====================================================================
-          7. ASSISTANT IA & IMPORT EXCEL/TEXTE
-         ===================================================================== */}
-      {page === 'assistant' && (
-        <div className="space-y-6">
-          <CommunicationAssistant projects={clarityProjects} meps={db.mep} />
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-black text-slate-900">Assistant IA & Import Contrôlé</h3>
-              <p className="text-xs text-slate-500">
-                Préparez des projets et des MEP depuis un texte ou un classeur Excel, puis validez les données avant import.
-              </p>
-            </div>
-            <span className="px-3 py-1 rounded-full text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">IA Clarity prête</span>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Step 1: Source */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">1. Source à analyser</h4>
-                <p className="text-xs text-slate-500">Collez un texte ou importez un fichier Excel, CSV, TXT ou JSON.</p>
-              </div>
-
-              <label className="border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/40 rounded-2xl p-6 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-colors">
-                <FileSpreadsheet className="w-7 h-7 text-indigo-600" />
-                <span className="text-xs font-bold text-slate-800">Importer un fichier</span>
-                <span className="text-[11px] text-slate-500">.xlsx · .xls · .csv · .txt · .json</span>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.csv,.txt,.json"
-                  className="hidden"
-                  onChange={handleAssistantFileUpload}
-                />
-              </label>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-700">
-                  Texte / contenu à analyser
-                </label>
-                <textarea
-                  rows={7}
-                  value={assistantSource}
-                  onChange={(e) => setAssistantSource(e.target.value)}
-                  placeholder="Collez ici un mail, un compte rendu, un descriptif projet ou des lignes de planning…"
-                  className="w-full p-3 text-xs font-mono border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => {
-                    setAssistantSource('');
-                    setAssistantJson('');
-                    setAssistantFileInfo('Aucun fichier chargé.');
-                    setAssistantPromptText('');
-                    setAssistantParsed([]);
-                    setAssistantPreviewMsg(null);
-                  }}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  Effacer
-                </button>
-                <button
-                  onClick={buildAssistantPrompt}
-                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  Préparer un prompt externe
-                </button>
-                <button
-                  onClick={handleAnalyzeWithClarityAI}
-                  disabled={isAiParsing}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ml-auto"
-                >
-                  {isAiParsing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                  <span>Analyser automatiquement</span>
-                </button>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600">
-                {assistantFileInfo}
-              </div>
-            </div>
-
-          </div>
-
-          {/* Step 3: Validation & Import */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">3. Résultat JSON et validation</h4>
-                <p className="text-xs text-slate-500">
-                  Vérifiez la réponse JSON avant création. Aucune donnée n’est créée sans votre validation.
-                </p>
-              </div>
-              <button
-                onClick={handleCopyPrompt}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copier le prompt</span>
-              </button>
-            </div>
-
-            <textarea
-              rows={6}
-              value={assistantJson}
-              onChange={(e) => setAssistantJson(e.target.value)}
-              placeholder='{"mep":[{"project":"Projet A","title":"Mise en production ...","date":"2026-12-15T22:00","owner":"Nom","changeNumbers":"CHG...","tasks":[]}]}'
-              className="w-full p-3 text-xs font-mono border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => previewAssistantJson()}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold cursor-pointer"
-              >
-                Vérifier et prévisualiser
-              </button>
-              <button
-                onClick={handleImportAssistantMeps}
-                disabled={assistantParsed.filter((x) => !x.missing?.length).length === 0}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer disabled:opacity-40"
-              >
-                Créer les MEP validées
-              </button>
-            </div>
-
-            {assistantPreviewMsg && (
-              <div
-                className={`p-3 rounded-xl text-xs font-semibold border ${
-                  assistantPreviewMsg.type === 'ok'
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    : 'bg-rose-50 border-rose-200 text-rose-800'
-                }`}
-              >
-                {assistantPreviewMsg.text}
-              </div>
-            )}
-
-            {assistantParsed.length > 0 && (
-              <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase">
-                    <tr>
-                      <th className="p-3">#</th>
-                      <th className="p-3">Projet / MEP</th>
-                      <th className="p-3">Date</th>
-                      <th className="p-3">Responsable</th>
-                      <th className="p-3">Change</th>
-                      <th className="p-3">Contrôle</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {assistantParsed.map((x) => (
-                      <tr key={x._index}>
-                        <td className="p-3 font-mono">{x._index}</td>
-                        <td className="p-3">
-                          <div className="font-bold text-slate-900">{x.project || 'À compléter'}</div>
-                          <div className="text-[11px] text-slate-500">{x.title || 'Intitulé manquant'}</div>
-                        </td>
-                        <td className="p-3 font-mono">{x.date || '—'}</td>
-                        <td className="p-3">{x.owner || '—'}</td>
-                        <td className="p-3 font-mono text-sky-700">{x.changeNumbers || '—'}</td>
-                        <td className="p-3">
-                          {x.duplicate ? (
-                            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-bold">
-                              Doublon potentiel
-                            </span>
-                          ) : x.missing?.length ? (
-                            <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
-                              À compléter : {x.missing.join(', ')}
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
-                              Prête
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
