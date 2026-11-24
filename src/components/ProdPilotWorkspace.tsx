@@ -415,7 +415,7 @@ const normalizeMep = (x: any, projects: Project[]): MepEntry => {
     changeNumbers: parseItsmNumbers(x.changeNumbers || x.changeRef || '').join(', '),
     ritmNumbers: parseItsmNumbers(x.ritmNumbers || '').join(', '),
     itsmReferences: normalizeItsmReferences(x.itsmReferences, String(x.changeNumbers || x.changeRef || ''), String(x.ritmNumbers || '')),
-    trigrams: Array.from(new Set((Array.isArray(x.trigrams) ? x.trigrams : String(x.runbook?.trigram || '').split(/[\\n,; ]+/)).map((t: any) => String(t || '').trim().toUpperCase()).filter(Boolean))),
+    trigrams: Array.from(new Set((Array.isArray(x.trigrams) ? x.trigrams : String(x.runbook?.trigram || '').split(/[\n,; ]+/)).map((t: any) => String(t || '').trim().toUpperCase()).filter(Boolean))),
     rollback: String(x.rollback || ''),
     description: String(x.description || ''),
     people: Array.isArray(x.people) ? x.people.map((p: any) => ({ name: String(p?.name || ''), role: String(p?.role || '') })) : [],
