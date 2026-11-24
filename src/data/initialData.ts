@@ -33,8 +33,6 @@ export const DEFAULT_KPI_WIDGETS: KPIWidget[] = [
     thresholds: { greenMin: 0.98, amberMin: 0.90, target: 1.05 },
   },
   {
-  {
-  {
     id: 'w-status-pie',
     type: 'TASK_STATUS_PIE',
     title: 'Répartition des Tâches par Statut',
