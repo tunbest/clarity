@@ -119,6 +119,7 @@ export interface Project {
   description: string;
   client?: string;
   managerName: string;
+  managerId?: string;
   status: ProjectStatus;
   projectStatus?: ProjectLifecycleStatus;
   priority: PriorityLevel;
