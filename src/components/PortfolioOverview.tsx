@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Project, PortfolioScope } from '../types';
+import { AIImportAssistant } from './AIImportAssistant';
 import { calculateProjectMetrics, formatCurrency, formatDateFR } from '../utils/pmCalculations';
 import { 
   Layers, 
@@ -107,6 +108,8 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
         {scopeError && <p className="text-xs text-rose-600">{scopeError}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{scopes.map(scope=><div key={scope.id} className="border border-slate-200 rounded-xl p-3 flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-slate-900">{scope.code} — {scope.name}</div><div className="flex flex-wrap gap-1 mt-2">{scope.trigrams.map(t=><span key={t} className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">{t}</span>)}</div><div className="text-[10px] text-slate-500 mt-2">{projects.filter(p=>p.scopeId===scope.id).length} projet(s)</div></div><button onClick={()=>{if(window.confirm('Supprimer ce périmètre ? Les projets associés doivent être réaffectés avant suppression.')){if(projects.some(p=>p.scopeId===scope.id)){setScopeError('Réaffectez les projets de ce périmètre avant de le supprimer.');return;}void saveScopeList(scopes.filter(s=>s.id!==scope.id));}}} className="text-xs text-rose-600 font-bold">Supprimer</button></div>)}</div>
       </section>}
+
+      {canManageScopes && <AIImportAssistant />}
 
       {/* Aggregate Portfolio KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
