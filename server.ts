@@ -162,6 +162,8 @@ async function ensureAuthSchema() {
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS app_sessions_expiry_idx ON app_sessions(expires_at)');
   await pool.query(`CREATE TABLE IF NOT EXISTS workspace_state (id SMALLINT PRIMARY KEY CHECK (id=1), projects JSONB NOT NULL, revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS portfolio_scope_state (id SMALLINT PRIMARY KEY CHECK (id=1), scopes JSONB NOT NULL DEFAULT '[]'::jsonb, revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`INSERT INTO portfolio_scope_state(id,scopes,revision) VALUES(1,'[]'::jsonb,1) ON CONFLICT(id) DO NOTHING`);
   await pool.query(`CREATE TABLE IF NOT EXISTS mep_workspace_state (id SMALLINT PRIMARY KEY CHECK (id=1), meps JSONB NOT NULL DEFAULT '[]'::jsonb, revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await pool.query(`INSERT INTO mep_workspace_state(id,meps,revision) VALUES(1,'[]'::jsonb,1) ON CONFLICT(id) DO NOTHING`);
   await pool.query(`CREATE TABLE IF NOT EXISTS system_settings (id SMALLINT PRIMARY KEY CHECK (id=1), settings JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
@@ -247,6 +249,7 @@ app.use('/api', async (req: Request, res: Response, next) => {
     if ((route.startsWith('/users') || route.startsWith('/admin') || route === '/schema/sql' || route === '/audit-logs') && role !== 'ADMINISTRATEUR') return res.status(403).json({error:'Accès administrateur requis.'});
     if ((route === '/projects' && method === 'POST' || /^\/projects\/[^/]+$/.test(route) && method === 'DELETE') && !RBAC.canCreateOrDeleteProject(role)) return res.status(403).json({error:'Droits insuffisants pour cette opération.'});
     if (route === '/workspace' && method === 'PUT' && role === 'CONTRIBUTEUR') return res.status(403).json({error:'Les contributeurs ne peuvent pas remplacer le portefeuille complet.'});
+    if (route === '/scopes' && write && !['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(role)) return res.status(403).json({error:'Seuls le Directeur de Projets ou l’Administrateur peuvent gérer les périmètres.'});
     if (/^\/projects\/[^/]+$/.test(route) && method === 'PUT' && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','PMO'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour modifier ce projet.'});
     if (/^\/projects\/[^/]+\/team/.test(route) && write && !RBAC.canManageResources(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les ressources.'});
     if (/^\/projects\/[^/]+\/tasks/.test(route) && write && !RBAC.canManageTasks(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les tâches.'});
@@ -257,6 +260,29 @@ app.use('/api', async (req: Request, res: Response, next) => {
     if (route.startsWith('/copilot') && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','CHEF_PROJET_PROD'].includes(role)) return res.status(403).json({error:'Accès Copilot refusé.'});
     next();
   } catch (e) { next(e); }
+});
+
+// Portfolio scopes are managed by the Director of Projects and persisted independently.
+app.get('/api/scopes', async (_req: Request, res: Response) => {
+  const result = await getPgPool()!.query('SELECT scopes,revision,updated_at FROM portfolio_scope_state WHERE id=1');
+  const row = result.rows[0];
+  res.json({ success: true, scopes: row?.scopes || [], revision: Number(row?.revision || 1), updatedAt: row?.updated_at || null });
+});
+app.put('/api/scopes', async (req: Request, res: Response) => {
+  const scopes = req.body?.scopes;
+  const revision = Number(req.body?.revision);
+  if (!Array.isArray(scopes) || scopes.length > 300 || !Number.isSafeInteger(revision) || revision < 1) return res.status(400).json({ error: 'Liste de périmètres invalide.' });
+  const ids = new Set<string>(); const codes = new Set<string>();
+  for (const scope of scopes) {
+    if (!scope || typeof scope.id !== 'string' || !scope.id || typeof scope.code !== 'string' || !scope.code.trim() || typeof scope.name !== 'string' || !scope.name.trim() || !Array.isArray(scope.trigrams) || scope.trigrams.length > 200) return res.status(400).json({ error: 'Chaque périmètre doit avoir un identifiant, un code, un nom et une liste de trigrammes.' });
+    if (ids.has(scope.id) || codes.has(scope.code.trim().toUpperCase())) return res.status(409).json({ error: 'Identifiant ou code de périmètre dupliqué.' });
+    ids.add(scope.id); codes.add(scope.code.trim().toUpperCase());
+    const trigramSet = new Set<string>();
+    for (const raw of scope.trigrams) { const value = String(raw || '').trim().toUpperCase(); if (!value || value.length > 20 || trigramSet.has(value)) return res.status(400).json({ error: 'Trigramme vide, trop long ou dupliqué dans un périmètre.' }); trigramSet.add(value); }
+  }
+  const result = await getPgPool()!.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(scopes.map((s:any)=>({...s,code:s.code.trim().toUpperCase(),trigrams:Array.from(new Set(s.trigrams.map((t:string)=>t.trim().toUpperCase())))})), revision]);
+  if (!result.rowCount) return res.status(409).json({ error: 'Les périmètres ont été modifiés par un autre utilisateur. Rechargez la page.' });
+  res.json({ success: true, revision: Number(result.rows[0].revision), updatedAt: result.rows[0].updated_at });
 });
 
 // Shared workspace snapshot: PostgreSQL is the source of truth for the SPA's project portfolio.
