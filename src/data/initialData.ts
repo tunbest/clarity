@@ -43,7 +43,6 @@ export const DEFAULT_KPI_WIDGETS: KPIWidget[] = [
     order: 6,
   },
   {
-  {
     id: 'w-workload',
     type: 'WORKLOAD_BAR',
     title: 'Charge & Capacité des Ressources',
