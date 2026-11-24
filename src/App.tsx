@@ -672,6 +672,8 @@ export const App: React.FC = () => {
       {projectModalState.isOpen && (
         <AddEditProjectModal
           project={projectModalState.project}
+          scopes={scopes}
+          canManageScopes={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR'}
           onClose={() => setProjectModalState({ isOpen: false, project: null })}
           onSaveProject={handleSaveProject}
           onDeleteProject={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR' ? handleDeleteProject : undefined}
