@@ -353,6 +353,7 @@ export const App: React.FC = () => {
         if (!importResponse.ok) throw new Error(result.error || 'Import complet refusé.');
         workspaceRevisionRef.current = Number(result.workspaceRevision) || workspaceRevisionRef.current + 1;
         setProjects(importedProjects);
+        if (Array.isArray(parsed.scopes)) { setScopes(parsed.scopes); setScopesRevision((value) => value + 1); }
         setActiveProjectId(importedProjects[0]?.id || '');
         setWorkspaceImportVersion((value) => value + 1);
         setWorkspaceError(null);
