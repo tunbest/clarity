@@ -1,19 +1,15 @@
 import React, { useState } from 'react';
 import { Project, PortfolioScope } from '../types';
 import { AIImportAssistant } from './AIImportAssistant';
-import { calculateProjectMetrics, formatCurrency, formatDateFR } from '../utils/pmCalculations';
+import { calculateProjectMetrics, formatDateFR } from '../utils/pmCalculations';
 import { 
   Layers, 
   Plus, 
   ArrowRight, 
   Activity, 
-  DollarSign, 
   CheckCircle2, 
   AlertTriangle, 
-  TrendingUp, 
-  Clock 
 } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 interface PortfolioOverviewProps {
   projects: Project[];
@@ -78,20 +74,10 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
     };
   });
 
-  const totalPortfolioBudget = projectStats.reduce((sum, ps) => sum + (ps.metrics?.BAC || 0), 0);
-  const totalPortfolioActualCost = projectStats.reduce((sum, ps) => sum + (ps.metrics?.AC || 0), 0);
   const averageProgress = Math.round(
     projectStats.reduce((sum, ps) => sum + (ps.metrics?.progressPercent || 0), 0) / (projects.length || 1)
   );
   const totalActiveRisks = projectStats.reduce((sum, ps) => sum + (ps.metrics?.criticalRisksCount || 0), 0);
-
-  // Chart data
-  const chartData = projectStats.map((ps) => ({
-    name: ps.project.code,
-    Budget: ps.metrics?.BAC || 0,
-    Dépensé: ps.metrics?.AC || 0,
-    Avancement: ps.metrics?.progressPercent || 0,
-  }));
 
   return (
     <div className="space-y-6">
@@ -168,24 +154,8 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
       {canManageScopes && <AIImportAssistant />}
 
       {/* Aggregate Portfolio KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
-        {/* Total Budget */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase">Budget Portefeuille</span>
-            <DollarSign className="w-4 h-4 text-indigo-600" />
-          </div>
-          <div className="mt-2">
-            <span className="text-2xl font-black text-slate-900">
-              {formatCurrency(totalPortfolioBudget, '€')}
-            </span>
-            <span className="text-xs text-slate-500 block mt-1">
-              Engagé : <strong>{formatCurrency(totalPortfolioActualCost, '€')}</strong>
-            </span>
-          </div>
-        </div>
-
         {/* Average Progress */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
@@ -232,29 +202,6 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
 
       </div>
 
-      {/* Cross-Project Comparison Chart */}
-      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
-        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-4">
-          Comparatif Budgétaire des Projets (Budget Alloué vs Consommé)
-        </h3>
-
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-              <XAxis dataKey="name" stroke="#94A3B8" fontSize={11} tickLine={false} />
-              <YAxis stroke="#94A3B8" fontSize={11} tickFormatter={(v) => `${v / 1000}k€`} tickLine={false} />
-              <Tooltip 
-                formatter={(val: any) => formatCurrency(Number(val), '€')}
-                contentStyle={{ backgroundColor: '#1E293B', borderRadius: '8px', border: 'none', color: '#F8FAFC', fontSize: '11px' }}
-              />
-              <Bar dataKey="Budget" fill="#6366F1" radius={[4, 4, 0, 0]} name="Budget Alloué (BAC)" />
-              <Bar dataKey="Dépensé" fill="#10B981" radius={[4, 4, 0, 0]} name="Dépensé Réel (AC)" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
       {/* Projects List Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-4 bg-slate-50/80 border-b border-slate-200">
@@ -272,7 +219,7 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
                 <th className="p-3">Chef de Projet</th>
                 <th className="p-3">Statut</th>
                 <th className="p-3">Score Santé</th>
-                <th className="p-3">Indices SPI / CPI</th>
+                <th className="p-3">Indicateur planning (SPI)</th>
                 <th className="p-3">Avancement</th>
                 <th className="p-3 text-right">Budget Consommé / Alloué</th>
                 <th className="p-3 text-right">Action</th>
@@ -323,9 +270,6 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
                         <span className={`px-1.5 py-0.5 rounded text-[10px] ${metrics.SPI >= 1 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
                           SPI: {metrics.SPI}
                         </span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${metrics.CPI >= 1 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                          CPI: {metrics.CPI}
-                        </span>
                       </div>
                     </td>
 
@@ -336,13 +280,6 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
                         </div>
                         <span className="font-bold text-slate-700">{metrics.progressPercent}%</span>
                       </div>
-                    </td>
-
-                    <td className="p-3 text-right">
-                      <strong className="text-slate-900">{formatCurrency(metrics.AC, project.currency)}</strong>
-                      <span className="text-slate-400 block text-[10px]">
-                        sur {formatCurrency(metrics.BAC, project.currency)}
-                      </span>
                     </td>
 
                     <td className="p-3 text-right">
