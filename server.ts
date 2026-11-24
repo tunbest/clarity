@@ -312,6 +312,8 @@ function cleanOfficeXml(value: string): string { return value.replace(/<a:br\s*\
 
 app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
   try {
+    const actor = getUserFromRequest(req);
+    if (!['DIRECTEUR_PROJETS','ADMINISTRATEUR'].includes(actor.role || '')) return res.status(403).json({ error: 'Seuls le Directeur de Projets ou l’Administrateur peuvent lancer une extraction portefeuille.' });
     const { fileName, fileBase64 } = req.body || {};
     if (typeof fileName !== 'string' || typeof fileBase64 !== 'string' || !fileBase64 || fileBase64.length > 16000000) return res.status(400).json({ error: 'Fichier manquant ou supérieur à 12 Mo.' });
     const ext = fileName.toLowerCase().split('.').pop();
