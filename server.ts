@@ -401,41 +401,6 @@ app.post('/api/admin/copilot/test', async (req: Request, res: Response) => {
 });
 
 
-/**
- * Meeting audio is captured explicitly by the user's browser and sent to the
- * private Whisper service on this VPS. No audio is forwarded to Copilot or Graph.
- */
-app.post('/api/meetings/transcribe', express.raw({ type: () => true, limit: '150mb' }), async (req: Request, res: Response) => {
-  const audio = req.body;
-  const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-  const allowedTypes = ['audio/webm', 'video/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/mpeg'];
-  if (!Buffer.isBuffer(audio) || audio.length < 1024) return res.status(400).json({ success: false, error: 'Fichier audio absent ou trop court.' });
-  if (!allowedTypes.includes(mimeType)) return res.status(415).json({ success: false, error: 'Format audio non pris en charge.' });
-  const whisperEndpoint = process.env.WHISPER_API_URL || 'http://whisper:9000/asr';
-  try {
-    const endpoint = new URL(whisperEndpoint);
-    if (!['http:', 'https:'].includes(endpoint.protocol)) throw new Error('WHISPER_API_URL invalide.');
-    endpoint.searchParams.set('task', 'transcribe');
-    endpoint.searchParams.set('language', 'fr');
-    endpoint.searchParams.set('output', 'json');
-    const form = new FormData();
-    form.append('audio_file', new Blob([audio], { type: mimeType }), mimeType.includes('mp4') ? 'meeting.mp4' : mimeType.includes('ogg') ? 'meeting.ogg' : mimeType.includes('wav') ? 'meeting.wav' : 'meeting.webm');
-    const response = await fetch(endpoint, { method: 'POST', body: form, signal: AbortSignal.timeout(45 * 60 * 1000) });
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 500);
-      return res.status(502).json({ success: false, error: `Le moteur Whisper est indisponible (HTTP ${response.status}). ${detail}` });
-    }
-    const payload: any = await response.json();
-    const transcript = String(payload.text || payload.transcription || '').trim();
-    if (!transcript) return res.status(422).json({ success: false, error: 'Whisper n’a détecté aucune parole.' });
-    res.json({ success: true, transcript, engine: 'faster-whisper', language: 'fr' });
-  } catch (error: any) {
-    console.error('Meeting transcription failed:', error);
-    const unavailable = error?.name === 'TimeoutError' || error?.cause?.code === 'ECONNREFUSED' || error?.cause?.code === 'ENOTFOUND';
-    res.status(unavailable ? 503 : 500).json({ success: false, error: unavailable ? 'Le service Whisper ne répond pas encore. Réessayez dans quelques instants.' : 'Erreur pendant la transcription audio.' });
-  }
-});
-
 app.post('/api/communications/draft', async (req: Request, res: Response) => {
   const { mode, context, transcript = '' } = req.body || {};
   if (!['mep-start', 'mep-end', 'coproj'].includes(mode)) return res.status(400).json({ success: false, error: 'Type de document invalide.' });
