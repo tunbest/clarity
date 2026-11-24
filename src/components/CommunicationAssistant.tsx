@@ -87,9 +87,9 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
 
   const openOutlook = () => {
     if (!draft.subject.trim() || !draft.body.trim()) { setMessage('Le sujet et le contenu sont obligatoires.'); setNotice('warning'); return; }
-    const recipients = recipientText.split(/[;,\n]/).map((x) => x.trim()).filter(Boolean).join(';');
+    const recipients = recipientText.split(/[;,\n]/).map((x) => x.trim()).filter(Boolean).map(encodeURIComponent).join(',');
     const params = new URLSearchParams({ subject: draft.subject, body: draft.body });
-    window.location.href = 'mailto:' + encodeURIComponent(recipients) + '?' + params.toString();
+    window.location.href = 'mailto:' + recipients + '?' + params.toString();
     setMessage('Ouverture demandée à Outlook. Vérifiez puis enregistrez le message comme brouillon ; rien n’est envoyé automatiquement.');
     setNotice('info');
   };
