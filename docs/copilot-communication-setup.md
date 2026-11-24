@@ -1,72 +1,56 @@
-# Clarity AI – Copilot Studio et client Outlook
+# Clarity PM – Transcription Teams et communication
 
-## Fonctionnalités
+## Fonctionnement
 
-Dans **Production / MEP → Assistant Copilot**, Clarity permet de générer :
-- un mail de début de MEP ;
-- un mail de fin de MEP ;
-- un compte rendu COPROJ à partir des notes ou de la transcription saisies.
+Le module **Production / MEP → Assistant communication** propose :
+- mails de début et de fin de MEP préparés côté serveur ;
+- capture audio explicite d'une réunion Teams Desktop depuis Edge ou Chrome ;
+- transcription française par Whisper / faster-whisper hébergé sur le VPS ;
+- compte rendu COPROJ structuré à partir de la transcription ;
+- édition du sujet et du corps, copie et ouverture d'un nouveau message Outlook via `mailto:`.
 
-Le brouillon reste modifiable dans Clarity. Pour les deux mails MEP, le bouton **Ouvrir dans Outlook** prépare un nouveau message dans le client de messagerie par défaut du poste via le protocole standard `mailto:`. Pour utiliser Outlook, configurez Outlook comme application par défaut pour les liens e-mail dans Windows / votre navigateur.
+Aucune intégration Copilot Studio, Microsoft Entra, Microsoft Graph ou Outlook API n'est utilisée. Clarity ne lit pas la boîte Outlook et n'envoie aucun e-mail. L'ouverture `mailto:` préremplit une fenêtre de composition du client configuré ; l'utilisateur vérifie et envoie manuellement.
 
-## Architecture et limites
+## Capture audio Teams Desktop
 
-- Clarity dialogue avec l'agent Copilot Studio via le SDK Microsoft Agents/Copilot Studio.
-- L'authentification Microsoft (MSAL) sert uniquement à autoriser l'accès à l'agent Copilot Studio.
-- **Aucune intégration Outlook API / Microsoft Graph n'est utilisée.**
-- Clarity ne lit pas la boîte Outlook, ne crée pas de brouillon dans le dossier Brouillons via le cloud et n'envoie aucun message.
-- Le client Outlook local reçoit un nouveau message prérempli (destinataires, objet et corps) via `mailto:`. L'utilisateur vérifie et envoie manuellement.
-- Si Outlook n'est pas configuré comme gestionnaire des liens `mailto:`, le navigateur peut ouvrir une autre application ou demander de choisir un client.
-- Les notes et les données de projet/MEP sélectionnées sont transmises à l'agent Copilot Studio. Vérifiez les règles de confidentialité de votre organisation avant d'utiliser des informations internes ou sensibles.
+1. Ouvrir Clarity dans Edge ou Chrome via HTTPS et se connecter.
+2. Aller dans **Production / MEP → Assistant communication** et choisir **Transcription + CR COPROJ**.
+3. Cliquer **Démarrer l'écoute**.
+4. Dans le sélecteur du navigateur, choisir l'écran sur lequel Teams Desktop est affiché et activer **Partager l'audio du système**.
+5. Autoriser le microphone pour inclure également la voix locale. Si le microphone est refusé, seul l'audio système sera capturé.
+6. Cliquer **Arrêter et transcrire** à la fin de la réunion.
+7. Le fichier audio est envoyé au serveur privé Whisper du VPS ; le texte revient dans Clarity.
+8. Le serveur utilise la clé `GEMINI_API_KEY` déjà configurée dans Clarity pour produire le CR. Relire, corriger, puis copier ou ouvrir le brouillon dans Outlook.
 
-## Configuration Copilot Studio
+La capture nécessite une action explicite du navigateur et le partage de l'audio. Clarity n'écoute pas en arrière-plan. Le partage d'écran peut être interrompu par le navigateur ou l'utilisateur. Le navigateur enregistre l'audio pendant la réunion ; la transcription complète et le CR sont produits après l'arrêt, pas en direct.
 
-1. Ouvrir l'agent Clarity dans Copilot Studio et vérifier qu'il est publié et accessible à l'utilisateur.
-2. Dans **Settings → Advanced → Metadata**, récupérer l'**Environment ID** et le **Schema name**.
-3. Vérifier le nom de schéma de l'agent ; la valeur préremplie dans Clarity est `cr299_clarity_tB6p_X`.
+## Déploiement Whisper sur le VPS
 
-## Authentification Copilot
+Le workflow de déploiement ajoute un service Docker privé sur le réseau de l'application :
+- image CPU `onerahmet/openai-whisper-asr-webservice:v1.10.0` ;
+- moteur `faster_whisper` ;
+- modèle `base`, langue demandée `fr` ;
+- cache persistant Docker `whisper-cache` ;
+- API interne `http://whisper:9000/asr`, aucun port public exposé.
 
-L'intégration Copilot Studio nécessite une application Microsoft Entra de type SPA et une autorisation déléguée à l'agent :
+Le modèle est téléchargé au premier démarrage. Prévoir environ 2,5 Go pour l'image Docker et de l'espace disque supplémentaire pour le cache du modèle. Le modèle `base` est un compromis de ressources ; un modèle `small` peut améliorer la précision au prix d'une consommation mémoire et d'un temps de traitement supérieurs.
 
-1. Créer une inscription d'application dans le tenant qui héberge l'environnement Copilot Studio.
-2. Ajouter une plateforme **Single-page application (SPA)** et l'URL HTTPS exacte de Clarity comme URI de redirection.
-3. Ajouter l'autorisation déléguée **Power Platform API → CopilotStudio.Copilots.Invoke**.
-4. Accorder le consentement requis par la politique de l'organisation.
-5. Ne pas créer de client secret et ne jamais stocker de secret dans le navigateur.
+## Configuration
 
-Aucune permission Microsoft Graph, notamment `Mail.ReadWrite`, n'est nécessaire pour Outlook.
+- `WHISPER_API_URL` : facultatif, défaut `http://whisper:9000/asr` ; ne doit pointer que vers un service Whisper de confiance.
+- `GEMINI_API_KEY` : déjà utilisée par le serveur Clarity pour la génération du compte rendu et des mails. L'audio n'est pas envoyé à Gemini ; seul le texte transcrit et le contexte métier sont utilisés pour générer le CR.
 
-## Configuration dans Clarity
+## Sécurité et confidentialité
 
-Dans **Production / MEP → Assistant Copilot → Clarity AI · Communication**, renseigner :
-- **Tenant ID** : Directory (tenant) ID ;
-- **Application (Client) ID** : Application (client) ID ;
-- **Copilot Studio Environment ID** : valeur de l'environnement ;
-- **Agent Schema name** : `cr299_clarity_tB6p_X` (à confirmer dans le tenant).
+- Les routes de transcription et de génération exigent une session Clarity valide.
+- Le service Whisper n'expose aucun port sur Internet ; il est joignable uniquement depuis le réseau Docker.
+- Les fichiers audio ne sont pas enregistrés dans PostgreSQL ni conservés par Clarity après la requête.
+- Les participants doivent être informés et les règles de l'entreprise relatives à l'enregistrement et aux données personnelles doivent être respectées.
+- Le compte rendu reste modifiable et n'est jamais envoyé automatiquement.
 
-Enregistrer la configuration puis cliquer sur **Se connecter à Copilot**.
+## Limites connues
 
-## Utilisation
-
-1. Choisir **Mail de début de MEP**, **Mail de fin de MEP** ou **Compte rendu COPROJ (notes)**.
-2. Sélectionner la MEP ou le projet concerné.
-3. Pour le COPROJ, coller les notes ou la transcription.
-4. Cliquer sur **Générer avec Copilot**.
-5. Relire et corriger le sujet et le contenu dans Clarity.
-6. Pour un mail MEP, renseigner les destinataires si nécessaire et cliquer sur **Ouvrir dans Outlook**.
-7. Vérifier le message dans le client Outlook avant de l'envoyer manuellement.
-
-Le protocole `mailto:` dépend du navigateur et du poste. Si le corps du message est trop long pour le gestionnaire de liens, utiliser **Copier** dans Clarity puis coller le contenu dans un nouveau message Outlook.
-
-## Dépannage
-
-- **AADSTS / consentement refusé** : vérifier le tenant, l'URI SPA et l'autorisation déléguée Copilot Studio.
-- **Agent introuvable / 404** : vérifier l'Environment ID, le Schema name, la publication de l'agent et les droits d'accès de l'utilisateur.
-- **Outlook ne s'ouvre pas** : vérifier qu'Outlook est installé et défini comme application par défaut pour le protocole `MAILTO` dans Windows et le navigateur.
-- **Le sujet ou le corps n'est pas prérempli** : utiliser le bouton **Copier**, puis coller dans un nouveau message Outlook ; certains clients limitent la longueur des URI `mailto:`.
-- **Aucune réponse exploitable** : vérifier les instructions et les sorties de l'agent Copilot Studio. Les informations manquantes doivent rester à confirmer et le contenu doit être relu.
-
-## Références Microsoft
-
-- [Intégrer une application web ou native à Copilot Studio avec Microsoft 365 Agents SDK](https://learn.microsoft.com/microsoft-copilot-studio/publication-integrate-web-or-native-app-m365-agents-sdk)
+- La capture audio système de Teams Desktop dépend du navigateur, de Windows et du périphérique audio. Utiliser Edge/Chrome à jour et partager l'écran entier avec l'audio système activé.
+- La capture du microphone local est demandée séparément ; si elle est refusée, la voix locale peut manquer.
+- La transcription n'identifie pas automatiquement de façon fiable chaque intervenant. Les noms, responsables et échéances absents de la transcription doivent rester « À confirmer ».
+- Les enregistrements très longs peuvent nécessiter davantage de mémoire et de temps CPU sur le VPS.
