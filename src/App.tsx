@@ -295,8 +295,9 @@ export const App: React.FC = () => {
       if (!response.ok) throw new Error(data.error || 'Export des MEP impossible.');
       const backup = {
         format: 'clarity-workspace',
-        version: 2,
+        version: 3,
         exportedAt: new Date().toISOString(),
+        scopes,
         projects,
         meps: data.meps || [],
       };
@@ -343,6 +344,7 @@ export const App: React.FC = () => {
           body: JSON.stringify({
             projects: importedProjects,
             meps,
+            scopes: Array.isArray(parsed.scopes) ? parsed.scopes : undefined,
             workspaceRevision: Number(workspace.revision),
             mepRevision: Number(mepState.revision),
           }),
