@@ -34,6 +34,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { AppUser, Project } from '../types';
+import { CommunicationAssistant } from './CommunicationAssistant';
 
 export type ProdPilotPage =
   | 'dashboard'
@@ -55,7 +56,7 @@ export type MepStatus =
   | 'Échec'
   | 'Annulée';
 
-export type MepTaskStatus = 'À faire' | 'En cours' | 'En validation' | 'Terminé';
+export type MepTaskStatus = 'À faire' | 'En cours' | 'En validation' | 'Bloqué' | 'Terminé';
 
 export interface MepPerson {
   name: string;
@@ -71,6 +72,8 @@ export interface MepTask {
   duration: number;
   status: MepTaskStatus;
   notes: string;
+  projectTaskId?: string;
+  projectMilestoneId?: string;
 }
 
 export interface MepMinute {
@@ -120,6 +123,7 @@ interface ProdPilotWorkspaceProps {
   currentUser: AppUser;
   projects?: Project[];
   activeProjectId?: string;
+  onUpdateProject?: (project: Project) => void;
 }
 
 const MEP_STATUSES: MepStatus[] = [
@@ -137,6 +141,7 @@ const KANBAN_COLUMNS: MepTaskStatus[] = [
   'À faire',
   'En cours',
   'En validation',
+  'Bloqué',
   'Terminé',
 ];
 
@@ -178,6 +183,8 @@ const normalizeTask = (t: Partial<MepTask>): MepTask => ({
     ? (t.status as MepTaskStatus)
     : 'À faire',
   notes: t.notes || '',
+  projectTaskId: t.projectTaskId || undefined,
+  projectMilestoneId: t.projectMilestoneId || undefined,
 });
 
 const createDefaultTasks = (): MepTask[] =>
@@ -217,7 +224,7 @@ const getStatusBadgeClasses = (status: string) => {
   if (['Réussie', 'Terminé', 'GO'].includes(status)) {
     return 'bg-emerald-50 text-emerald-700 border-emerald-200';
   }
-  if (['Échec', 'Annulée', 'NO-GO'].includes(status)) {
+  if (['Échec', 'Annulée', 'NO-GO', 'Bloqué'].includes(status)) {
     return 'bg-rose-50 text-rose-700 border-rose-200';
   }
   if (['En cours', 'Planifiée'].includes(status)) {
@@ -233,6 +240,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   currentUser,
   projects: clarityProjects = [],
   activeProjectId,
+  onUpdateProject,
 }) => {
   const [db, setDb] = useState<ProdPilotDb>({ mep: [], kanban: [] });
   const [mepLoaded, setMepLoaded] = useState(false);
@@ -242,6 +250,59 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
 
   useEffect(() => { let active = true; fetch('/api/meps', { credentials: 'same-origin' }).then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Chargement MEP impossible'); return data; }).then((data) => { if (!active) return; const meps = (data.meps || []).map((m: any) => normalizeMep(m, clarityProjects)); setDb({ mep: meps, kanban: [] }); mepRevision.current = Number(data.revision) || 1; setMepLoadError(null); setMepLoaded(true); }).catch((error) => { console.error(error); if (active) { setMepLoadError(error instanceof Error ? error.message : 'Impossible de charger les MEP depuis le serveur'); } }); return () => { active = false; }; }, [currentUser.id]);
   useEffect(() => { setDb((current) => ({ ...current, mep: current.mep.map((m) => ({ ...m, project: clarityProjects.find((p) => p.id === m.projectId)?.name || m.project })) })); }, [clarityProjects]);
+
+  // Reflect edits made in the general project workspace back into linked MEP actions.
+  useEffect(() => {
+    if (!mepLoaded || !db.mep.length) return;
+    let changed = false;
+    const synchronized = db.mep.map((mep) => {
+      const project = clarityProjects.find((item) => item.id === mep.projectId);
+      if (!project) return mep;
+      const baseDate = dayStr(mep.date) || isoToday();
+      const tasks = (mep.tasks || []).map((task) => {
+        if (task.projectTaskId) {
+          const projectTask = project.tasks.find((item) => item.id === task.projectTaskId);
+          if (!projectTask) {
+            changed = true;
+            return { ...task, projectTaskId: undefined };
+          }
+          if (projectTask) {
+            const status: MepTaskStatus = projectTask.status === 'DONE' ? 'Terminé'
+              : projectTask.status === 'IN_PROGRESS' ? 'En cours'
+              : projectTask.status === 'REVIEW' ? 'En validation'
+              : projectTask.status === 'BLOCKED' ? 'Bloqué' : 'À faire';
+            const start = dayStr(projectTask.startDate) || baseDate;
+            const end = dayStr(projectTask.dueDate) || start;
+            const offset = Math.round((new Date(`${start}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
+            const duration = Math.max(1, Math.round((new Date(`${end}T12:00:00`).getTime() - new Date(`${start}T12:00:00`).getTime()) / 86400000) + 1);
+            if (task.status !== status || task.offset !== offset || task.duration !== duration) {
+              changed = true;
+              return { ...task, status, offset, duration };
+            }
+          }
+        }
+        if (task.kind === 'Jalon' && task.projectMilestoneId) {
+          const milestone = project.milestones.find((item) => item.id === task.projectMilestoneId);
+          if (!milestone) {
+            changed = true;
+            return { ...task, projectMilestoneId: undefined };
+          }
+          if (milestone) {
+            const status: MepTaskStatus = milestone.completed ? 'Terminé' : 'À faire';
+            const offset = Math.round((new Date(`${dayStr(milestone.targetDate)}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
+            if (task.status !== status || task.offset !== offset || task.duration !== 1) {
+              changed = true;
+              return { ...task, status, offset, duration: 1 };
+            }
+          }
+        }
+        return task;
+      });
+      return tasks === mep.tasks ? mep : { ...mep, tasks };
+    });
+    if (changed) persistDb({ ...db, mep: synchronized });
+  }, [clarityProjects, db.mep, mepLoaded]);
+
 
   const [page, setPage] = useState<ProdPilotPage>(activeProjectId ? 'mep' : 'dashboard');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -487,6 +548,43 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     setIsMepModalOpen(true);
   };
 
+  const syncLinkedProjectData = (mep: MepEntry, tasks: MepTask[]) => {
+    const project = clarityProjects.find((item) => item.id === mep.projectId);
+    if (!project || !onUpdateProject) return;
+    const linkedProjectTaskIds = new Set(tasks.map((task) => task.projectTaskId).filter(Boolean));
+    const mepTag = `MEP:${mep.ref || mep.id}`;
+    const nextTasks = project.tasks.map((projectTask) => {
+      const linked = tasks.find((task) => task.projectTaskId === projectTask.id);
+      if (!linked) {
+        if ((projectTask.tags || []).includes(mepTag) && !linkedProjectTaskIds.has(projectTask.id)) {
+          return { ...projectTask, tags: (projectTask.tags || []).filter((tag) => tag !== mepTag) };
+        }
+        return projectTask;
+      }
+      const dates = getTaskDates(mep, linked);
+      const status = linked.status === 'Terminé' ? 'DONE'
+        : linked.status === 'En cours' ? 'IN_PROGRESS'
+        : linked.status === 'En validation' ? 'REVIEW'
+        : linked.status === 'Bloqué' ? 'BLOCKED' : 'TODO';
+      return {
+        ...projectTask,
+        status,
+        startDate: dates.start,
+        dueDate: dates.end,
+        tags: Array.from(new Set([...(projectTask.tags || []).filter((tag) => tag !== mepTag), mepTag])),
+        completionPercent: status === 'DONE' ? 100 : status === 'IN_PROGRESS' ? Math.max(projectTask.completionPercent || 0, 50) : status === 'REVIEW' ? Math.max(projectTask.completionPercent || 0, 90) : 0,
+      };
+    });
+    const nextMilestones = project.milestones.map((milestone) => {
+      const linked = tasks.find((task) => task.kind === 'Jalon' && task.projectMilestoneId === milestone.id);
+      if (!linked) return milestone;
+      const dates = getTaskDates(mep, linked);
+      const completed = linked.status === 'Terminé';
+      return { ...milestone, targetDate: dates.start, completed, actualDate: completed ? (milestone.actualDate || dates.start) : undefined };
+    });
+    onUpdateProject({ ...project, tasks: nextTasks, milestones: nextMilestones, updatedAt: new Date().toISOString() });
+  };
+
   const handleSaveMep = (e: React.FormEvent) => {
     e.preventDefault();
     if (!mepForm.projectId || !clarityProjects.some((p) => p.id === mepForm.projectId)) { showToast('Sélectionnez un projet Clarity existant.'); return; }
@@ -495,6 +593,18 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       .filter((p) => p.name.trim())
       .map((p) => ({ name: p.name.trim(), role: (p.role || '').trim() }));
     const cleanTasks = taskDraft.map(normalizeTask);
+    const existingMep = db.mep.find((m) => m.id === editMepId);
+    const mepId = existingMep?.id || uid('MEP');
+    const mepRef = existingMep?.ref || `MEP-${mepId.slice(-5)}`;
+    const targetProject = clarityProjects.find((p) => p.id === mepForm.projectId);
+    if (existingMep && existingMep.projectId !== mepForm.projectId) {
+      const previousProject = clarityProjects.find((p) => p.id === existingMep.projectId);
+      if (previousProject && onUpdateProject) {
+        const previousTag = `MEP:${existingMep.ref || existingMep.id}`;
+        onUpdateProject({ ...previousProject, tasks: previousProject.tasks.map((task) => ({ ...task, tags: (task.tags || []).filter((tag) => tag !== previousTag) })) });
+      }
+    }
+    if (targetProject) syncLinkedProjectData({ ...(existingMep || {} as MepEntry), ...mepForm, id: mepId, ref: mepRef, projectId: targetProject.id, date: mepForm.date || isoToday() } as MepEntry, cleanTasks);
 
     if (editMepId) {
       const updatedMeps = db.mep.map((m) =>
@@ -512,10 +622,9 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       ) as MepEntry[];
       persistDb({ ...db, mep: updatedMeps });
     } else {
-      const id = uid('MEP');
       const newEntry: MepEntry = {
-        id,
-        ref: `MEP-${id.slice(-5)}`,
+        id: mepId,
+        ref: mepRef,
         projectId: (mepForm.projectId || '').trim(),
         project: clarityProjects.find((p) => p.id === mepForm.projectId)?.name || '',
         title: (mepForm.title || 'Nouvelle MEP').trim(),
@@ -549,6 +658,12 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       confirmLabel: 'Supprimer la MEP',
       danger: true,
       onConfirm: () => {
+        const project = clarityProjects.find((item) => item.id === m.projectId);
+        if (project && onUpdateProject) {
+          const mepTag = `MEP:${m.ref || m.id}`;
+          onUpdateProject({ ...project, tasks: project.tasks.map((task) => ({ ...task, tags: (task.tags || []).filter((tag) => tag !== mepTag) })) });
+        }
+        // A linked project task remains in the project as a normal task; only its MEP link is removed.
         persistDb({ ...db, mep: db.mep.filter((x) => x.id !== m.id) });
         setConfirmAction(null);
         showToast('MEP supprimée');
@@ -567,10 +682,11 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
 
   // Kanban Task Status update
   const handleMoveKanbanTask = (taskId: string, newStatus: MepTaskStatus) => {
-    const updated = db.mep.map((m) => ({
-      ...m,
-      tasks: (m.tasks || []).map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)),
-    }));
+    const updated = db.mep.map((m) => {
+      const tasks = (m.tasks || []).map((t) => (t.id === taskId ? { ...t, status: newStatus } : t));
+      if (tasks.some((t, index) => t.id === taskId && t.status === newStatus)) syncLinkedProjectData(m, tasks);
+      return { ...m, tasks };
+    });
     persistDb({ ...db, mep: updated });
     showToast('Avancement mis à jour');
   };
@@ -2414,6 +2530,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
          ===================================================================== */}
       {page === 'assistant' && (
         <div className="space-y-6">
+          <CommunicationAssistant projects={clarityProjects} meps={db.mep} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-black text-slate-900">Assistant Copilot & Import Contrôlé</h3>
@@ -3064,7 +3181,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     {taskDraft.map((t, i) => (
                       <div
                         key={t.id}
-                        className="grid grid-cols-1 md:grid-cols-[2fr_90px_1fr_80px_70px_115px_34px] gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200"
+                        className="grid grid-cols-1 md:grid-cols-[2fr_90px_1fr_80px_70px_115px_1fr_1fr_34px] gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200"
                       >
                         <input
                           type="text"
@@ -3123,6 +3240,49 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                           }}
                           className="text-xs p-2 rounded-lg border border-slate-300 bg-white font-mono"
                         />
+                        <select
+                          value={t.projectTaskId || ''}
+                          title="Lier à une tâche du projet général"
+                          onChange={(e) => {
+                            const next = [...taskDraft];
+                            next[i].projectTaskId = e.target.value || undefined;
+                            setTaskDraft(next);
+                          }}
+                          className="text-xs p-2 rounded-lg border border-slate-300 bg-white"
+                        >
+                          <option value="">Tâche projet : aucune</option>
+                          {(clarityProjects.find((p) => p.id === mepForm.projectId)?.tasks || []).map((projectTask) => (
+                            <option
+                              key={projectTask.id}
+                              value={projectTask.id}
+                              disabled={db.mep.some((entry) => entry.id !== editMepId && entry.projectId === mepForm.projectId && entry.tasks.some((linkedTask) => linkedTask.projectTaskId === projectTask.id)) || taskDraft.some((other, otherIndex) => otherIndex !== i && other.projectTaskId === projectTask.id)}
+                            >
+                              {projectTask.title}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={t.projectMilestoneId || ''}
+                          title="Lier à un jalon du projet général"
+                          disabled={t.kind !== 'Jalon'}
+                          onChange={(e) => {
+                            const next = [...taskDraft];
+                            next[i].projectMilestoneId = e.target.value || undefined;
+                            setTaskDraft(next);
+                          }}
+                          className="text-xs p-2 rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                        >
+                          <option value="">Jalon projet : aucun</option>
+                          {(clarityProjects.find((p) => p.id === mepForm.projectId)?.milestones || []).map((milestone) => (
+                            <option
+                              key={milestone.id}
+                              value={milestone.id}
+                              disabled={db.mep.some((entry) => entry.id !== editMepId && entry.projectId === mepForm.projectId && entry.tasks.some((linkedTask) => linkedTask.projectMilestoneId === milestone.id))}
+                            >
+                              {milestone.title}
+                            </option>
+                          ))}
+                        </select>
                         <select
                           value={t.status}
                           onChange={(e) => {
