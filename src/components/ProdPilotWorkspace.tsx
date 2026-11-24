@@ -548,9 +548,16 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const syncLinkedProjectData = (mep: MepEntry, tasks: MepTask[]) => {
     const project = clarityProjects.find((item) => item.id === mep.projectId);
     if (!project || !onUpdateProject) return;
+    const linkedProjectTaskIds = new Set(tasks.map((task) => task.projectTaskId).filter(Boolean));
+    const mepTag = `MEP:${mep.ref || mep.id}`;
     const nextTasks = project.tasks.map((projectTask) => {
       const linked = tasks.find((task) => task.projectTaskId === projectTask.id);
-      if (!linked) return projectTask;
+      if (!linked) {
+        if ((projectTask.tags || []).includes(mepTag) && !linkedProjectTaskIds.has(projectTask.id)) {
+          return { ...projectTask, tags: (projectTask.tags || []).filter((tag) => tag !== mepTag) };
+        }
+        return projectTask;
+      }
       const dates = getTaskDates(mep, linked);
       const status = linked.status === 'Terminé' ? 'DONE'
         : linked.status === 'En cours' ? 'IN_PROGRESS'
@@ -560,8 +567,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         status,
         startDate: dates.start,
         dueDate: dates.end,
-        milestoneId: linked.projectMilestoneId || projectTask.milestoneId,
-        tags: Array.from(new Set([...(projectTask.tags || []), `MEP:${mep.ref || mep.id}`])),
+        tags: Array.from(new Set([...(projectTask.tags || []).filter((tag) => tag !== mepTag), mepTag])),
         completionPercent: status === 'DONE' ? 100 : status === 'IN_PROGRESS' ? Math.max(projectTask.completionPercent || 0, 50) : status === 'REVIEW' ? Math.max(projectTask.completionPercent || 0, 90) : 0,
       };
     });
@@ -639,6 +645,12 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       confirmLabel: 'Supprimer la MEP',
       danger: true,
       onConfirm: () => {
+        const project = clarityProjects.find((item) => item.id === m.projectId);
+        if (project && onUpdateProject) {
+          const mepTag = `MEP:${m.ref || m.id}`;
+          onUpdateProject({ ...project, tasks: project.tasks.map((task) => ({ ...task, tags: (task.tags || []).filter((tag) => tag !== mepTag) })) });
+        }
+        // A linked project task remains in the project as a normal task; only its MEP link is removed.
         persistDb({ ...db, mep: db.mep.filter((x) => x.id !== m.id) });
         setConfirmAction(null);
         showToast('MEP supprimée');
