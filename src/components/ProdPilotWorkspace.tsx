@@ -1012,7 +1012,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   };
 
   const handleCopyPrompt = async () => {
-    const v = assistantPromptText || buildCopilotPrompt();
+    const v = assistantPromptText || buildAssistantPrompt();
     if (!v) return;
     try {
       await navigator.clipboard.writeText(v);
@@ -2442,15 +2442,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 Préparez des projets et des MEP depuis un texte ou un classeur Excel, puis validez les données avant import.
               </p>
             </div>
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                copilotConnected
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-amber-50 text-amber-800 border-amber-200'
-              }`}
-            >
-              {copilotConnected ? 'Agent Assistant IA prêt' : 'IA Clarity intégrée prête'}
-            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">IA Clarity prête</span>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2501,7 +2493,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   Effacer
                 </button>
                 <button
-                  onClick={buildCopilotPrompt}
+                  onClick={buildAssistantPrompt}
                   className="px-3.5 py-2 bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold cursor-pointer"
                 >
                   Préparer un prompt externe
