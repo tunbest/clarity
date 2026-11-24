@@ -33,17 +33,29 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [notice, setNotice] = useState<'info' | 'success' | 'warning'>('info');
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
   const selectedProject = useMemo(() => projects.find((p) => p.id === (mode === 'coproj' ? selectedProjectId : selectedMep?.projectId)), [projects, mode, selectedProjectId, selectedMep]);
-  const savedRecipients: Recipient[] = selectedMep?.runbook?.recipients || [];
+  const activeRecipients: Recipient[] = mode === 'coproj'
+    ? (selectedProject?.members || []).filter((member) => member.email).map((member) => ({
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        to: true,
+        cc: false,
+        coproj: true
+      }))
+    : selectedMep?.runbook?.recipients || [];
 
   useEffect(() => {
-    const eligible = savedRecipients.filter((recipient) => categoryForMode(mode, recipient));
+    const eligible = mode === 'coproj'
+      ? activeRecipients
+      : activeRecipients.filter((recipient) => categoryForMode(mode, recipient));
     setSelectedRecipientIds(eligible.map((recipient) => recipient.id));
-  }, [selectedMepId, mode, meps]);
+  }, [selectedMepId, selectedProjectId, mode, meps, projects]);
 
   const createDraft = () => {
-    if (!selectedMep) { setMessage('Sélectionnez une MEP pour charger son carnet de destinataires.'); setNotice('warning'); return; }
+    if (mode === 'coproj' && !selectedProject) { setMessage('Sélectionnez le projet concerné.'); setNotice('warning'); return; }
+    if (mode !== 'coproj' && !selectedMep) { setMessage('Sélectionnez une MEP.'); setNotice('warning'); return; }
     if (mode === 'coproj' && transcript.trim().length < 20) { setMessage('Collez les notes ou la transcription Teams Copilot.'); setNotice('warning'); return; }
-    const projectName = selectedProject?.name || selectedMep.project || 'Projet à préciser';
+    const projectName = selectedProject?.name || selectedMep?.project || 'Projet à préciser';
     const m = selectedMep;
     let subject = '';
     let body = '';
@@ -161,7 +173,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
 
   const openOutlook = () => {
     if (!draft.subject.trim() || !draft.body.trim()) { setMessage('Le sujet et le contenu sont obligatoires.'); setNotice('warning'); return; }
-    const selected = savedRecipients.filter((recipient) => selectedRecipientIds.includes(recipient.id));
+    const selected = activeRecipients.filter((recipient) => selectedRecipientIds.includes(recipient.id));
     const to = selected.filter((recipient) => recipient.to !== false && recipient.email).map((recipient) => recipient.email);
     const cc = selected.filter((recipient) => recipient.cc && recipient.email).map((recipient) => recipient.email);
     const manual = manualRecipients.split(/[;,\n]/).map((x) => x.trim()).filter(Boolean);
@@ -190,8 +202,8 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     <section className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
       <div>
         <div className="flex items-center gap-2 text-indigo-700"><Mail className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Communication production · Outlook</span></div>
-        <h3 className="text-lg font-black text-slate-900 mt-1">Préparer un compte rendu ou un mail MEP</h3>
-        <p className="text-xs text-slate-500 mt-1">Modèles structurés et carnet de destinataires de la MEP. Teams Copilot reste la source des notes de réunion.</p>
+        <h3 className="text-lg font-black text-slate-900 mt-1">Préparer un compte rendu projet ou un mail MEP</h3>
+        <p className="text-xs text-slate-500 mt-1">Le compte rendu COPROJ est rattaché au projet ; les mails de début et de fin restent rattachés à une MEP.</p>
       </div>
       <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-950 space-y-1">
         <b>Workflow Teams Copilot</b>
@@ -213,9 +225,12 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
             ? <select value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select>
             : <select value={selectedMepId} onChange={(e) => setSelectedMepId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{meps.map((m) => <option key={m.id} value={m.id}>{m.project} · {m.ref || m.id} · {m.title}</option>)}</select>}
         </label>
-        <label className="text-xs font-bold text-slate-700 space-y-1">{mode === 'coproj' ? 'Carnet de destinataires' : 'Destinataires issus de la MEP'}
-          <select value={selectedMepId} onChange={(e) => setSelectedMepId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{meps.map((m) => <option key={m.id} value={m.id}>{m.project} · {m.ref || m.id} · {m.title}</option>)}</select>
-        </label>
+        <div className="text-xs font-bold text-slate-700 space-y-1">
+          <span>{mode === 'coproj' ? 'Destinataires du projet' : 'Destinataires issus de la MEP'}</span>
+          {mode === 'coproj'
+            ? <p className="font-normal text-slate-500">Les membres du projet sont proposés automatiquement.</p>
+            : <select value={selectedMepId} onChange={(e) => setSelectedMepId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{meps.map((m) => <option key={m.id} value={m.id}>{m.project} · {m.ref || m.id} · {m.title}</option>)}</select>}
+        </div>
       </div>
       {mode === 'coproj' ? (
         <div className="border border-indigo-200 rounded-xl p-4 space-y-3">
@@ -235,19 +250,19 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         </div>
       ) : null}
       <div className="border border-slate-200 rounded-xl p-4 space-y-3">
-        <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><Users className="w-4 h-4 text-indigo-600" /> Carnet de destinataires conservé sur la MEP</div>
-        {savedRecipients.length ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{savedRecipients.map((recipient) => (
+        <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><Users className="w-4 h-4 text-indigo-600" /> {mode === 'coproj' ? 'Équipe et destinataires du projet' : 'Carnet de destinataires de la MEP'}</div>
+        {activeRecipients.length ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{activeRecipients.map((recipient) => (
           <label key={recipient.id} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-xs">
             <input type="checkbox" checked={selectedRecipientIds.includes(recipient.id)} onChange={(e) => setSelectedRecipientIds((current) => e.target.checked ? [...current, recipient.id] : current.filter((id) => id !== recipient.id))} />
             <span className="min-w-0 flex-1"><b className="block truncate">{recipient.name || recipient.email}</b><span className="text-slate-500">{recipient.email} · {recipient.cc ? 'Cc' : 'À'}</span></span>
             <span className="text-[10px] text-slate-400">{[recipient.information && 'Info', recipient.sondes && 'Sondes', recipient.start && 'Début', recipient.end && 'Fin', recipient.coproj && 'COPROJ'].filter(Boolean).join(' / ')}</span>
           </label>
-        ))}</div> : <p className="text-xs text-slate-500">Aucun destinataire enregistré sur cette MEP. Ajoutez-les dans Pilotage → Paramètres & destinataires.</p>}
+        ))}</div> : <p className="text-xs text-slate-500">{mode === 'coproj' ? 'Aucun membre avec adresse e-mail dans ce projet. Ajoutez les membres au projet ou saisissez des adresses ponctuelles.' : 'Aucun destinataire enregistré sur cette MEP. Ajoutez-les dans Pilotage → Paramètres & destinataires.'}</p>}
         <label className="block text-xs font-bold text-slate-700 space-y-1">Ajouter des adresses ponctuelles en À (facultatif)
           <input value={manualRecipients} onChange={(e) => setManualRecipients(e.target.value)} placeholder="equipe@entreprise.fr; production@entreprise.fr" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
         </label>
       </div>
-      <button onClick={createDraft} disabled={!selectedMep || (mode === 'coproj' && transcript.trim().length < 20)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><FileText className="w-4 h-4" /> Préparer le brouillon</button>
+      <button onClick={createDraft} disabled={(mode === 'coproj' ? !selectedProject || transcript.trim().length < 20 : !selectedMep)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><FileText className="w-4 h-4" /> Préparer le brouillon</button>
       {(draft.subject || draft.body) && <div className="border border-indigo-100 bg-indigo-50/30 rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><FileText className="w-4 h-4" /> Brouillon à relire et modifier</div>
         <label className="block text-xs font-bold text-slate-700 space-y-1">Objet
