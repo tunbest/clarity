@@ -52,10 +52,6 @@ export function calculateProjectMetrics(project: Project): ProjectMetrics {
   };
 }
 
-export function formatCurrency(amount: number, currency: string = '€'): string {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: currency === '€' ? 'EUR' : currency === '$' ? 'USD' : 'EUR', maximumFractionDigits: 0 }).format(amount);
-}
-
 export function formatDateFR(dateStr?: string): string {
   if (!dateStr) return '-';
   try { return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }); }
