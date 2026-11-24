@@ -307,7 +307,7 @@ function extractOfficeXml(buffer: Buffer, matcher: RegExp): string[] {
   }
   return results;
 }
-function cleanOfficeXml(value: string): string { return value.replace(/<a:br\\s*\\/>/g, '\\n').replace(/<\\/(?:a:p|w:p)>/g, '\\n').replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/[ \\t]+/g,' ').replace(/\\n{3,}/g,'\\n\\n').trim(); }
+function cleanOfficeXml(value: string): string { return value.replace(/<a:br\s*\/>/g, '\n').replace(/<\/(?:a:p|w:p)>/g, '\n').replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim(); }
 
 app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
   try {
@@ -323,16 +323,16 @@ app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
     let parts: any[] = [];
     if (['xlsx','xls'].includes(ext || '')) {
       const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-      extracted = workbook.SheetNames.map(name => 'FEUILLE: ' + name + '\\n' + XLSX.utils.sheet_to_csv(workbook.Sheets[name])).join('\\n\\n');
+      extracted = workbook.SheetNames.map(name => 'FEUILLE: ' + name + '\n' + XLSX.utils.sheet_to_csv(workbook.Sheets[name])).join('\n\n');
     } else if (ext === 'csv' || ext === 'txt') extracted = buffer.toString('utf8');
     else if (ext === 'pdf') parts.push({ inlineData: { mimeType: 'application/pdf', data: fileBase64 } });
-    else if (ext === 'pptx') extracted = extractOfficeXml(buffer, /^ppt\\/slides\\/slide\\d+\\.xml$/).map(cleanOfficeXml).join('\\n\\n');
-    else if (ext === 'docx') extracted = extractOfficeXml(buffer, /^word\\/document\\.xml$/).map(cleanOfficeXml).join('\\n');
+    else if (ext === 'pptx') extracted = extractOfficeXml(buffer, /^ppt\/slides\/slide\d+\.xml$/).map(cleanOfficeXml).join('\n\n');
+    else if (ext === 'docx') extracted = extractOfficeXml(buffer, /^word\/document\.xml$/).map(cleanOfficeXml).join('\n');
     if (!parts.length && extracted.trim().length < 20) return res.status(422).json({ error: 'Aucun texte exploitable trouvé dans le fichier.' });
-    const prompt = 'Analyse ce document pour Clarity PM. Retourne uniquement un JSON avec format clarity-ai-import, version 1, scopes[], projects[], meps[], coprojMeetings[], reviewItems[], sourceSummary. Chaque scope: code,name,description,trigrams[]. Chaque project: code,name,description,scopeCode,trigrams[]. Chaque MEP: ref,title,projectCode,trigrams[],version,date,owner,environment,status,priority,changeNumbers[],ritmNumbers[],description,rollback,people[],tasks[],runbook{prerequisites[],executionSteps[]}. Chaque COPROJ: projectCode,date,subject,attendees[],summary,decisions[],actions[{title,owner,dueDate,status}],risks[]. Le Directeur de projets crée les périmètres. Un périmètre contient plusieurs trigrammes et projets. Une MEP peut porter plusieurs trigrammes. COPROJ est rattaché au projet, jamais à une MEP. ServiceNow est manuel, ne prétends pas vérifier les tickets. N’invente rien : place les données incertaines dans reviewItems. Conserve exactement les références CHG et RITM. Ne confonds pas code application et trigramme.\\n\\n' + extracted;
+    const prompt = 'Analyse ce document pour Clarity PM. Retourne uniquement un JSON avec format clarity-ai-import, version 1, scopes[], projects[], meps[], coprojMeetings[], reviewItems[], sourceSummary. Chaque scope: code,name,description,trigrams[]. Chaque project: code,name,description,scopeCode,trigrams[]. Chaque MEP: ref,title,projectCode,trigrams[],version,date,owner,environment,status,priority,changeNumbers[],ritmNumbers[],description,rollback,people[],tasks[],runbook{prerequisites[],executionSteps[]}. Chaque COPROJ: projectCode,date,subject,attendees[],summary,decisions[],actions[{title,owner,dueDate,status}],risks[]. Le Directeur de projets crée les périmètres. Un périmètre contient plusieurs trigrammes et projets. Une MEP peut porter plusieurs trigrammes. COPROJ est rattaché au projet, jamais à une MEP. ServiceNow est manuel, ne prétends pas vérifier les tickets. N’invente rien : place les données incertaines dans reviewItems. Conserve exactement les références CHG et RITM. Ne confonds pas code application et trigramme.\n\n' + extracted;
     parts.unshift({ text: prompt });
     const response = await ai.models.generateContent({ model: 'gemini-3.7-flash', contents: [{ role: 'user', parts }], config: { responseMimeType: 'application/json' } });
-    const raw = (response.text || '').replace(/^\\s*```(?:json)?\\s*/i,'').replace(/\\s*```\\s*$/,'').trim();
+    const raw = (response.text || '').replace(/^\s*```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
     const draft = JSON.parse(raw);
     if (draft.format !== 'clarity-ai-import' || !Array.isArray(draft.scopes) || !Array.isArray(draft.projects) || !Array.isArray(draft.meps) || !Array.isArray(draft.coprojMeetings)) throw new Error('Le résultat IA ne respecte pas le schéma Clarity.');
     res.json({ success: true, draft, sourceFile: fileName, requiresReview: true });
