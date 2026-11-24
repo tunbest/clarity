@@ -34,6 +34,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { AppUser, Project } from '../types';
+import { CommunicationAssistant } from './CommunicationAssistant';
 
 export type ProdPilotPage =
   | 'dashboard'
@@ -2529,6 +2530,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
          ===================================================================== */}
       {page === 'assistant' && (
         <div className="space-y-6">
+          <CommunicationAssistant projects={clarityProjects} meps={db.mep} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-black text-slate-900">Assistant Copilot & Import Contrôlé</h3>
