@@ -1,69 +1,72 @@
-# Clarity AI – Copilot Studio et brouillons Outlook
+# Clarity AI – Copilot Studio et client Outlook
 
 ## Fonctionnalités
 
-Dans **Assistant Copilot**, le panneau **Clarity AI · Communication** permet de générer :
+Dans **Production / MEP → Assistant Copilot**, Clarity permet de générer :
 - un mail de début de MEP ;
 - un mail de fin de MEP ;
-- un compte rendu COPROJ à partir de notes ou d'une transcription.
+- un compte rendu COPROJ à partir des notes ou de la transcription saisies.
 
-Le texte généré reste modifiable. Pour les mails MEP, l'utilisateur peut créer un brouillon dans Outlook. Clarity ne déclenche aucun envoi automatique.
+Le brouillon reste modifiable dans Clarity. Pour les deux mails MEP, le bouton **Ouvrir dans Outlook** prépare un nouveau message dans le client de messagerie par défaut du poste via le protocole standard `mailto:`. Pour utiliser Outlook, configurez Outlook comme application par défaut pour les liens e-mail dans Windows / votre navigateur.
 
-## Architecture et sécurité
+## Architecture et limites
 
-- L'authentification locale Clarity reste inchangée.
-- La connexion Copilot Studio et Outlook est une authentification Microsoft séparée, effectuée dans le navigateur avec MSAL.
-- Aucun client secret Entra n'est nécessaire pour cette application SPA.
-- Les jetons MSAL sont conservés dans le stockage de session du navigateur.
-- Le brouillon Outlook est créé par Microsoft Graph avec l'autorisation déléguée `Mail.ReadWrite`.
-- Les notes et les données de projet sélectionnées sont envoyées à l'agent Copilot Studio pour générer le document. Vérifier les règles de confidentialité de l'organisation avant d'utiliser des données sensibles.
+- Clarity dialogue avec l'agent Copilot Studio via le SDK Microsoft Agents/Copilot Studio.
+- L'authentification Microsoft (MSAL) sert uniquement à autoriser l'accès à l'agent Copilot Studio.
+- **Aucune intégration Outlook API / Microsoft Graph n'est utilisée.**
+- Clarity ne lit pas la boîte Outlook, ne crée pas de brouillon dans le dossier Brouillons via le cloud et n'envoie aucun message.
+- Le client Outlook local reçoit un nouveau message prérempli (destinataires, objet et corps) via `mailto:`. L'utilisateur vérifie et envoie manuellement.
+- Si Outlook n'est pas configuré comme gestionnaire des liens `mailto:`, le navigateur peut ouvrir une autre application ou demander de choisir un client.
+- Les notes et les données de projet/MEP sélectionnées sont transmises à l'agent Copilot Studio. Vérifiez les règles de confidentialité de votre organisation avant d'utiliser des informations internes ou sensibles.
 
-## Configuration à réaliser une fois dans Microsoft Entra
+## Configuration Copilot Studio
 
-1. Créer une inscription d'application (App registrations) dans le même tenant que l'environnement Copilot Studio.
-2. Choisir une application monoposte / single tenant et ajouter une plateforme **Single-page application (SPA)**.
-3. Ajouter comme URI de redirection l'URL exacte utilisée pour accéder à Clarity (par exemple l'URL HTTPS de production).
-4. Dans **API permissions**, ajouter :
-   - **Power Platform API** → **Delegated permissions** → `CopilotStudio.Copilots.Invoke`.
-   - **Microsoft Graph** → **Delegated permissions** → `Mail.ReadWrite`.
-5. Accorder le consentement administrateur si la politique du tenant le demande.
-6. Ne pas créer ni placer de client secret dans Clarity : le Client ID d'une SPA est public.
+1. Ouvrir l'agent Clarity dans Copilot Studio et vérifier qu'il est publié et accessible à l'utilisateur.
+2. Dans **Settings → Advanced → Metadata**, récupérer l'**Environment ID** et le **Schema name**.
+3. Vérifier le nom de schéma de l'agent ; la valeur préremplie dans Clarity est `cr299_clarity_tB6p_X`.
 
-## Configuration dans Copilot Studio
+## Authentification Copilot
 
-1. Ouvrir l'agent Clarity et vérifier qu'il est publié.
-2. Vérifier que l'inscription Entra est dans le même tenant que l'agent.
-3. Dans **Settings → Advanced → Metadata**, récupérer l'**Environment ID** et le **Schema name**.
-4. Le champ Schema name de Clarity est prérempli avec `cr299_clarity_tB6p_X` ; vérifier qu'il correspond bien à l'agent publié.
-5. Le nom de schéma connu ne remplace pas l'Environment ID, le Tenant ID ni le Client ID.
+L'intégration Copilot Studio nécessite une application Microsoft Entra de type SPA et une autorisation déléguée à l'agent :
+
+1. Créer une inscription d'application dans le tenant qui héberge l'environnement Copilot Studio.
+2. Ajouter une plateforme **Single-page application (SPA)** et l'URL HTTPS exacte de Clarity comme URI de redirection.
+3. Ajouter l'autorisation déléguée **Power Platform API → CopilotStudio.Copilots.Invoke**.
+4. Accorder le consentement requis par la politique de l'organisation.
+5. Ne pas créer de client secret et ne jamais stocker de secret dans le navigateur.
+
+Aucune permission Microsoft Graph, notamment `Mail.ReadWrite`, n'est nécessaire pour Outlook.
 
 ## Configuration dans Clarity
 
-Ouvrir **Production / MEP → Assistant Copilot → Clarity AI · Communication** et renseigner :
-- Tenant ID : Directory (tenant) ID de l'inscription Entra ;
-- Application (Client) ID : Application (client) ID de l'inscription ;
-- Copilot Studio Environment ID : valeur des métadonnées de l'environnement ;
-- Agent Schema name : `cr299_clarity_tB6p_X` (à confirmer dans le tenant).
+Dans **Production / MEP → Assistant Copilot → Clarity AI · Communication**, renseigner :
+- **Tenant ID** : Directory (tenant) ID ;
+- **Application (Client) ID** : Application (client) ID ;
+- **Copilot Studio Environment ID** : valeur de l'environnement ;
+- **Agent Schema name** : `cr299_clarity_tB6p_X` (à confirmer dans le tenant).
 
-Cliquer sur **Enregistrer la configuration**, puis **Se connecter à Copilot**. Le navigateur ouvre la fenêtre de connexion Microsoft.
+Enregistrer la configuration puis cliquer sur **Se connecter à Copilot**.
 
 ## Utilisation
 
-1. Choisir le type de document.
-2. Sélectionner une MEP pour les mails, ou un projet et coller les notes/transcription pour un CR COPROJ.
-3. Générer avec Copilot.
-4. Relire et corriger le contenu.
-5. Pour un mail MEP, renseigner éventuellement les destinataires puis cliquer sur **Créer le brouillon Outlook**.
-6. Vérifier le message dans Outlook → Brouillons avant tout envoi manuel.
+1. Choisir **Mail de début de MEP**, **Mail de fin de MEP** ou **Compte rendu COPROJ (notes)**.
+2. Sélectionner la MEP ou le projet concerné.
+3. Pour le COPROJ, coller les notes ou la transcription.
+4. Cliquer sur **Générer avec Copilot**.
+5. Relire et corriger le sujet et le contenu dans Clarity.
+6. Pour un mail MEP, renseigner les destinataires si nécessaire et cliquer sur **Ouvrir dans Outlook**.
+7. Vérifier le message dans le client Outlook avant de l'envoyer manuellement.
+
+Le protocole `mailto:` dépend du navigateur et du poste. Si le corps du message est trop long pour le gestionnaire de liens, utiliser **Copier** dans Clarity puis coller le contenu dans un nouveau message Outlook.
 
 ## Dépannage
 
-- **AADSTS / consentement refusé** : vérifier le tenant, l'URI SPA et les permissions déléguées.
-- **Agent introuvable / 404** : vérifier l'Environment ID, le Schema name, la publication de l'agent et le partage/droits d'accès de l'utilisateur.
-- **Copilot répond mais Outlook échoue** : vérifier le consentement délégué Microsoft Graph `Mail.ReadWrite`.
-- **Aucune réponse exploitable** : vérifier les instructions et les sorties de l'agent Copilot Studio. Clarity n'invente pas les informations manquantes ; le contenu reste à relire.
+- **AADSTS / consentement refusé** : vérifier le tenant, l'URI SPA et l'autorisation déléguée Copilot Studio.
+- **Agent introuvable / 404** : vérifier l'Environment ID, le Schema name, la publication de l'agent et les droits d'accès de l'utilisateur.
+- **Outlook ne s'ouvre pas** : vérifier qu'Outlook est installé et défini comme application par défaut pour le protocole `MAILTO` dans Windows et le navigateur.
+- **Le sujet ou le corps n'est pas prérempli** : utiliser le bouton **Copier**, puis coller dans un nouveau message Outlook ; certains clients limitent la longueur des URI `mailto:`.
+- **Aucune réponse exploitable** : vérifier les instructions et les sorties de l'agent Copilot Studio. Les informations manquantes doivent rester à confirmer et le contenu doit être relu.
 
 ## Références Microsoft
 
 - [Intégrer une application web ou native à Copilot Studio avec Microsoft 365 Agents SDK](https://learn.microsoft.com/microsoft-copilot-studio/publication-integrate-web-or-native-app-m365-agents-sdk)
-- [Créer un brouillon Outlook avec Microsoft Graph](https://learn.microsoft.com/graph/api/user-post-messages?view=graph-rest-1.0)
