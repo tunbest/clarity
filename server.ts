@@ -283,6 +283,61 @@ app.put('/api/workspace', async (req: Request,res: Response) => {
   res.json({success:true,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
 });
 
+// Atomic full-workspace JSON restore: projects and every linked MEP record move together.
+app.post('/api/workspace/import', async (req: Request, res: Response) => {
+  const actor = getUserFromRequest(req);
+  if (!RBAC.canCreateOrDeleteProject(actor.role || 'CONTRIBUTEUR')) {
+    return res.status(403).json({ error: 'Seuls le Directeur de Projets ou l’Administrateur peuvent importer le portefeuille complet.' });
+  }
+  const projects = req.body?.projects;
+  const meps = req.body?.meps;
+  const workspaceRevision = Number(req.body?.workspaceRevision);
+  const mepRevision = Number(req.body?.mepRevision);
+  if (!Array.isArray(projects) || !Array.isArray(meps) || projects.length > 500 || meps.length > 5000 ||
+      !Number.isSafeInteger(workspaceRevision) || workspaceRevision < 1 ||
+      !Number.isSafeInteger(mepRevision) || mepRevision < 1 ||
+      projects.some((p: any) => !p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name || p.id.length > 128 || p.name.length > 300)) {
+    return res.status(400).json({ error: 'Format JSON Clarity invalide : projets, MEP ou versions manquants.' });
+  }
+  const projectIds = new Set<string>();
+  for (const project of projects) {
+    if (projectIds.has(project.id)) return res.status(400).json({ error: 'Identifiant projet dupliqué dans le JSON.' });
+    projectIds.add(project.id);
+  }
+  const mepIds = new Set<string>();
+  for (const mep of meps) {
+    if (!mep || typeof mep.id !== 'string' || !mep.id || typeof mep.projectId !== 'string' ||
+        typeof mep.title !== 'string' || !mep.title || !projectIds.has(mep.projectId)) {
+      return res.status(422).json({ error: 'Chaque MEP doit avoir un identifiant, un titre et un projet présent dans le même JSON.' });
+    }
+    if (mepIds.has(mep.id)) return res.status(400).json({ error: 'Identifiant MEP dupliqué dans le JSON.' });
+    mepIds.add(mep.id);
+  }
+  const client = await getPgPool()!.connect();
+  try {
+    await client.query('BEGIN');
+    const workspace = await client.query('SELECT revision FROM workspace_state WHERE id=1 FOR UPDATE');
+    const mepState = await client.query('SELECT revision FROM mep_workspace_state WHERE id=1 FOR UPDATE');
+    if (!workspace.rowCount || !mepState.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(503).json({ error: 'Espace de travail non initialisé. Rechargez Clarity puis réessayez.' });
+    }
+    if (Number(workspace.rows[0].revision) !== workspaceRevision || Number(mepState.rows[0].revision) !== mepRevision) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Les données ont changé depuis la sauvegarde. Rechargez Clarity et exportez une nouvelle sauvegarde avant restauration.' });
+    }
+    const p = await client.query('UPDATE workspace_state SET projects=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 RETURNING revision', [JSON.stringify(projects)]);
+    const m = await client.query('UPDATE mep_workspace_state SET meps=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 RETURNING revision', [JSON.stringify(meps)]);
+    await client.query('COMMIT');
+    res.json({ success: true, workspaceRevision: Number(p.rows[0].revision), mepRevision: Number(m.rows[0].revision), projects: projects.length, meps: meps.length });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 // Central MEP repository: every MEP belongs to an existing Clarity project.
 app.get('/api/meps', async (_req: Request, res: Response) => {
   const pool = getPgPool()!;
