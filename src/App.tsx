@@ -95,6 +95,7 @@ export const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
   const [scopes, setScopes] = useState<PortfolioScope[]>([]);
   const [scopesRevision, setScopesRevision] = useState(1);
+  const [projectManagers, setProjectManagers] = useState<Array<{id:string;displayName:string;email:string;jobTitle?:string;department?:string;disabled:boolean}>>([]);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const workspaceRevisionRef = useRef(0);
@@ -108,11 +109,24 @@ export const App: React.FC = () => {
   }, [currentUser?.id]);
 
   useEffect(() => {
-    if (!currentUser) { setScopes([]); return; }
+    if (!currentUser) { setScopes([]); setProjectManagers([]); return; }
     let active = true;
     fetch('/api/scopes', { credentials: 'same-origin' }).then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Chargement des périmètres impossible'); return data; }).then((data) => { if (!active) return; setScopes(data.scopes || []); setScopesRevision(Number(data.revision) || 1); }).catch((err) => { console.error('Chargement périmètres:', err); if (active) setWorkspaceError(err.message || 'Chargement des périmètres impossible.'); });
     return () => { active = false; };
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser || !['DIRECTEUR_PROJETS','ADMINISTRATEUR'].includes(currentUser.role || '')) { setProjectManagers([]); return; }
+    let active=true;fetch('/api/project-managers',{credentials:'same-origin'}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error||'Chargement des chefs de projet impossible');return d;}).then(d=>{if(active)setProjectManagers(d.managers||[]);}).catch(err=>{if(active)setWorkspaceError(err.message||'Chargement des chefs de projet impossible');});
+    return()=>{active=false;};
+  },[currentUser?.id,currentUser?.role]);
+
+  const handleCreateProjectManager = async (payload: {displayName:string;email:string;password:string;department?:string}) => {
+    const response=await fetch('/api/project-managers',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload)});const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||'Création du chef de projet impossible.');setProjectManagers(current=>[...current,result.manager]);
+  };
+  const handleToggleProjectManager = async (id:string,disabled:boolean) => {
+    const response=await fetch(`/api/project-managers/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({disabled})});const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||'Modification du chef de projet impossible.');setProjectManagers(current=>current.map(manager=>manager.id===id?result.manager:manager));
+  };
 
   const handleSaveScopes = async (nextScopes: PortfolioScope[]) => {
     const response = await fetch('/api/scopes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ scopes: nextScopes, revision: scopesRevision }) });
@@ -152,9 +166,12 @@ export const App: React.FC = () => {
       if (trigrams.some((value) => !scope.trigrams.includes(value))) throw new Error(`Les trigrammes du projet ${code} doivent être définis dans le périmètre ${scopeCode}.`);
       const existing = projects.find((project) => project.code.toUpperCase() === code);
       if (existing) updates.set(existing.id, { ...existing, name, description: String(item.description || existing.description || ''), scopeId: scope.id, trigrams, updatedAt: now });
-      else additions.push({ id: `proj-${Date.now()}-${additions.length}`, code, name, description: String(item.description || ''), scopeId: scope.id, trigrams, client: '', managerName: currentUser?.displayName || '', status: 'PLANNING', projectStatus: 'Planning', priority: 'MEDIUM', methodology: 'HYBRID', startDate: now.slice(0,10), endDate: new Date(Date.now()+90*86400000).toISOString().slice(0,10), totalBudget: 0, currency: '€', members: [], tasks: [], milestones: [], risks: [], kpiWidgets: [], createdAt: now, updatedAt: now });
+      else additions.push({ id: `proj-${Date.now()}-${additions.length}`, code, name, description: String(item.description || ''), scopeId: scope.id, trigrams, client: '', managerId: currentUser?.role === 'CHEF_PROJET' ? currentUser.id : undefined, managerName: currentUser?.displayName || '', status: 'PLANNING', projectStatus: 'Planning', priority: 'MEDIUM', methodology: 'HYBRID', startDate: now.slice(0,10), endDate: new Date(Date.now()+90*86400000).toISOString().slice(0,10), totalBudget: 0, currency: '€', members: [], tasks: [], milestones: [], risks: [], kpiWidgets: [], createdAt: now, updatedAt: now });
     }
-    await handleSaveScopes(mergedScopes);
+    if (currentUser?.role === 'CHEF_PROJET') {
+      const changedReference = mergedScopes.some(scope => { const old=scopes.find(s=>s.id===scope.id); return !old || old.code!==scope.code || old.name!==scope.name || old.trigrams.join('|')!==scope.trigrams.join('|'); });
+      if (changedReference) throw new Error('Le référentiel des trigrammes est géré par le Directeur de Projets. Utilisez uniquement les trigrammes existants.');
+    } else await handleSaveScopes(mergedScopes);
     setProjects((current) => [...current.map((project) => updates.get(project.id) || project), ...additions]);
   };
 
@@ -566,6 +583,10 @@ export const App: React.FC = () => {
                 canManageScopes={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR'}
                 canManageProjectCatalog={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR' || currentUser.role === 'CHEF_PROJET'}
                 onImportCatalog={handleImportCatalog}
+                projectManagers={projectManagers}
+                canManageManagers={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR'}
+                onCreateProjectManager={handleCreateProjectManager}
+                onToggleProjectManager={handleToggleProjectManager}
                 onEditProject={(project) => setProjectModalState({ isOpen: true, project })}
                 onSaveScopes={handleSaveScopes}
                 onUpdateProject={handleUpdateProject}
