@@ -49,10 +49,6 @@ const RBAC = {
   canManageRisks: (role: UserRole) => {
     return role === 'DIRECTEUR_PROJETS' || role === 'CHEF_PROJET' || role === 'CHEF_PROJET_PROD' || role === 'PMO' || role === 'ADMINISTRATEUR';
   },
-  canManageBudget: (role: UserRole) => {
-    // Le Chef de Projet Production n'a strictement aucun budget à gérer
-    return role === 'DIRECTEUR_PROJETS' || role === 'CHEF_PROJET' || role === 'ADMINISTRATEUR';
-  },
   canManageReleases: (role: UserRole) => {
     return role === 'CHEF_PROJET_PROD' || role === 'DIRECTEUR_PROJETS' || role === 'ADMINISTRATEUR';
   },
@@ -675,59 +671,10 @@ app.get('/api/schema/sql', (req: Request, res: Response) => {
 
 // 2. Portfolio Consolidated Analytics
 app.get('/api/portfolio/summary', (req: Request, res: Response) => {
-  const projects = dbStore.getAllProjects();
-  let totalBAC = 0;
-  let totalPV = 0;
-  let totalEV = 0;
-  let totalAC = 0;
-  let totalTasks = 0;
-  let completedTasks = 0;
-  let criticalRisks = 0;
-
-  projects.forEach((p) => {
-    totalBAC += p.totalBudget || 0;
-    totalTasks += p.tasks?.length || 0;
-    completedTasks += p.tasks?.filter((t) => t.status === 'DONE').length || 0;
-    criticalRisks += p.risks?.filter((r) => r.probability * r.impact >= 15).length || 0;
-    
-    p.tasks?.forEach((t) => {
-      const pv = t.costEstimated || 0;
-      const ac = t.costActual || 0;
-      const ev = (pv * (t.completionPercent || 0)) / 100;
-      totalPV += pv;
-      totalAC += ac;
-      totalEV += ev;
-    });
-  });
-
-  const portfolioCPI = totalAC > 0 ? parseFloat((totalEV / totalAC).toFixed(3)) : 1.0;
-  const portfolioSPI = totalPV > 0 ? parseFloat((totalEV / totalPV).toFixed(3)) : 1.0;
-
-  res.json({
-    success: true,
-    totalProjects: projects.length,
-    totalBAC,
-    totalPV,
-    totalEV,
-    totalAC,
-    portfolioCPI,
-    portfolioSPI,
-    costVarianceCV: totalEV - totalAC,
-    scheduleVarianceSV: totalEV - totalPV,
-    totalTasks,
-    completedTasks,
-    criticalRisks,
-    projectsSummary: projects.map((p) => ({
-      id: p.id,
-      code: p.code,
-      name: p.name,
-      client: p.client,
-      status: p.status,
-      totalBudget: p.totalBudget,
-      tasksCount: p.tasks?.length || 0,
-      membersCount: p.members?.length || 0,
-    })),
-  });
+  const projects=dbStore.getAllProjects();let totalTasks=0,completedTasks=0,overdueTasks=0,criticalRisks=0,totalEstimatedHours=0,totalActualHours=0;
+  const today=new Date().toISOString().slice(0,10);
+  projects.forEach((project:any)=>{const tasks=project.tasks||[];totalTasks+=tasks.length;completedTasks+=tasks.filter((t:any)=>t.status==='DONE').length;overdueTasks+=tasks.filter((t:any)=>t.status!=='DONE'&&t.dueDate&&t.dueDate<today).length;criticalRisks+=(project.risks||[]).filter((risk:any)=>risk.status==='ACTIVE'&&risk.probability*risk.impact>=15).length;tasks.forEach((task:any)=>{totalEstimatedHours+=Number(task.estimatedHours)||0;totalActualHours+=Number(task.actualHours)||0;});});
+  res.json({success:true,totalProjects:projects.length,totalTasks,completedTasks,overdueTasks,criticalRisks,totalEstimatedHours,totalActualHours,projectsSummary:projects.map((project:any)=>({id:project.id,code:project.code,name:project.name,status:project.status,tasksCount:project.tasks?.length||0,membersCount:project.members?.length||0}))});
 });
 
 // 3. Projects Endpoints (CRUD)
@@ -776,8 +723,6 @@ app.post('/api/projects', (req: Request, res: Response) => {
       methodology: projectPayload.methodology || 'HYBRID',
       startDate: projectPayload.startDate || new Date().toISOString().split('T')[0],
       endDate: projectPayload.endDate || new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
-      totalBudget: Number(projectPayload.totalBudget || projectPayload.budgetBAC) || 100000,
-      currency: projectPayload.currency || 'EUR',
       members: projectPayload.members || [],
       tasks: projectPayload.tasks || [],
       milestones: projectPayload.milestones || [],
@@ -843,8 +788,6 @@ app.post('/api/projects/:id/tasks', (req: Request, res: Response) => {
       estimatedHours: Number(taskPayload.estimatedHours) || 20,
       actualHours: Number(taskPayload.actualHours) || 0,
       completionPercent: Number(taskPayload.completionPercent || taskPayload.progress) || 0,
-      costEstimated: Number(taskPayload.costEstimated || taskPayload.plannedCost) || 2000,
-      costActual: Number(taskPayload.costActual || taskPayload.actualCost) || 0,
       category: taskPayload.category || 'Développement',
       tags: taskPayload.tags || ['WBS'],
       subtasks: taskPayload.subtasks || [],
@@ -890,7 +833,6 @@ app.post('/api/projects/:id/team', (req: Request, res: Response) => {
       name: memberPayload.name || 'Nouveau Collaborateur',
       role: memberPayload.role || 'Consultant / Expert',
       email: memberPayload.email || 'collaborateur@entreprise.fr',
-      hourlyRate: Number(memberPayload.hourlyRate || memberPayload.dailyRate) || 85,
       maxWeeklyHours: Number(memberPayload.maxWeeklyHours || memberPayload.capacityHoursPerWeek) || 35,
       avatarUrl: memberPayload.avatarUrl,
       color: memberPayload.color || '#3b82f6',
@@ -906,7 +848,7 @@ app.put('/api/projects/:id/team/:memberId', (req: Request, res: Response) => {
   const user = getUserFromRequest(req);
   if (!RBAC.canManageResources(user.role || 'DIRECTEUR_PROJETS')) {
     return res.status(403).json({
-      error: 'Accès refusé : Seul le Directeur de Projets peut modifier les TJM et allocations de ressources.',
+      error: 'Accès refusé : Seul le Directeur de Projets peut modifier les affectations et capacités des ressources.',
       requiredRole: 'DIRECTEUR_PROJETS',
     });
   }
@@ -951,7 +893,6 @@ app.post('/api/projects/:id/risks', (req: Request, res: Response) => {
       mitigationPlan: riskPayload.mitigationPlan || 'Surveillance hebdomadaire et points de contrôle.',
       contingencyPlan: riskPayload.contingencyPlan,
       ownerId: riskPayload.ownerId,
-      financialImpact: Number(riskPayload.financialImpact) || 0,
       identifiedDate: riskPayload.identifiedDate || new Date().toISOString().split('T')[0],
     },
     user
@@ -1026,98 +967,37 @@ app.post('/api/pm-ai/audit', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Données du projet manquantes.' });
   }
 
-  // Dynamic Rule-Based PM Engine Fallback (based on real PMBOK & EVM metrics)
+  // Diagnostic technique : planning, avancement, charge, jalons et risques.
   const generateDynamicPMAudit = (data: any) => {
-    const spi = Number(data.spi) || 1.0;
-    const cpi = Number(data.cpi) || 1.0;
-    const progress = Number(data.progress) || 0;
-    const activeRisks = Number(data.activeRisksCount) || 0;
-    const overdueTasks = Number(data.overdueTasksCount) || 0;
-
-    let healthScoreEstimate = 85;
-    if (spi < 0.9) healthScoreEstimate -= 15;
-    if (cpi < 0.9) healthScoreEstimate -= 15;
-    if (activeRisks > 2) healthScoreEstimate -= 10;
-    if (overdueTasks > 0) healthScoreEstimate -= 10;
-    healthScoreEstimate = Math.max(20, Math.min(100, healthScoreEstimate));
-
-    const strengths: string[] = [];
-    const alerts: string[] = [];
-    const recommendations: string[] = [];
-
-    // Evaluate SPI
-    if (spi >= 1.0) {
-      strengths.push(`Indice des délais favorable (SPI = ${spi.toFixed(2)}) : l'avancement respecte le planning initial.`);
-    } else {
-      alerts.push(`Retard sur le calendrier (SPI = ${spi.toFixed(2)}) : la valeur acquise est inférieure au planning prévu.`);
-      recommendations.push("Réexaminer le chemin critique et affecter des ressources prioritaires sur les tâches bloquantes (Fast-tracking).");
-    }
-
-    // Evaluate CPI
-    if (cpi >= 1.0) {
-      strengths.push(`Efficacité budgétaire maîtrisée (CPI = ${cpi.toFixed(2)}) : les coûts réels restent inférieurs au budget alloué.`);
-    } else {
-      alerts.push(`Dépassement budgétaire identifié (CPI = ${cpi.toFixed(2)}) : surcoût par rapport à la valeur livrée.`);
-      recommendations.push("Auditer les charges réelles et geler les dépenses non indispensables jusqu'au prochain jalon.");
-    }
-
-    // Evaluate Progress & Tasks
-    if (progress > 50) {
-      strengths.push(`Maturité du projet confirmée avec ${progress}% des livrables complétés.`);
-    }
-    if (overdueTasks > 0) {
-      alerts.push(`${overdueTasks} tâche(s) ont dépassé leur date limite de livraison.`);
-      recommendations.push("Organiser une réunion de déblocage opérationnelle d'urgence avec les responsables de lots.");
-    }
-
-    // Evaluate Risks
-    if (activeRisks > 0) {
-      alerts.push(`${activeRisks} risque(s) critique(s) identifié(s) dans la matrice ISO 31000.`);
-      recommendations.push("Activer immédiatement les plans de contingence pour les risques à sévérité élevée (score ≥ 15).");
-    } else {
-      strengths.push("Faible exposition aux risques critiques à ce stade du cycle de vie.");
-    }
-
-    if (recommendations.length === 0) {
-      recommendations.push("Maintenir la cadence des revues de sprint hebdomadaires et sécuriser la validation des livrables finaux.");
-    }
-
-    let summary = `Le projet "${data.name || 'Projet'}" affiche un avancement de ${progress}%. `;
-    if (spi >= 0.95 && cpi >= 0.95) {
-      summary += "La trajectoire globale est saine avec un bon équilibre entre respect du calendrier et maîtrise financière.";
-    } else if (spi < 0.95 && cpi < 0.95) {
-      summary += "Le projet traverse une zone de tension conjuguant dérive des délais et surcoût. Une action corrective immédiate est requise.";
-    } else if (spi < 0.95) {
-      summary += "Le projet accuse un retard calendaire qu'il convient de résorber en priorisant les jalons sur le chemin critique.";
-    } else {
-      summary += "Les délais sont sous contrôle mais la cadence des dépenses nécessite une vigilance budgétaire accrue.";
-    }
-
-    return {
-      summary,
-      healthScoreEstimate,
-      strengths,
-      alerts,
-      recommendations,
-      criticalPathAdvice: "Vérifier l'alignement des jalons majeurs et minimiser les flottements sur les tâches du chemin critique."
-    };
+    const spi=Number(data.spi)||1;const progress=Number(data.progress)||0;const activeRisks=Number(data.activeRisksCount)||0;const overdueTasks=Number(data.overdueTasksCount)||0;const blockedTasks=Number(data.blockedTasksCount)||0;
+    let healthScoreEstimate=100;if(spi<0.9)healthScoreEstimate-=15;else if(spi<0.98)healthScoreEstimate-=8;if(activeRisks>2)healthScoreEstimate-=15;else if(activeRisks>0)healthScoreEstimate-=5;if(overdueTasks>0)healthScoreEstimate-=Math.min(20,overdueTasks*4);if(blockedTasks>0)healthScoreEstimate-=Math.min(15,blockedTasks*5);healthScoreEstimate=Math.max(20,Math.min(100,healthScoreEstimate));
+    const strengths:string[]=[];const alerts:string[]=[];const recommendations:string[]=[];
+    if(spi>=1)strengths.push(`Avancement conforme au planning (SPI = ${spi.toFixed(2)}).`);else{alerts.push(`Retard planning détecté (SPI = ${spi.toFixed(2)}).`);recommendations.push('Réexaminer le chemin critique, les dépendances et les tâches bloquantes.');}
+    if(progress>=50)strengths.push(`Avancement des livrables : ${progress}%.`);
+    if(overdueTasks>0){alerts.push(`${overdueTasks} tâche(s) dépassent leur date cible.`);recommendations.push('Replanifier les tâches en retard avec un responsable et une date de résolution.');}
+    if(blockedTasks>0){alerts.push(`${blockedTasks} tâche(s) sont bloquées.`);recommendations.push('Organiser un point de déblocage technique avec les équipes concernées.');}
+    if(activeRisks>0){alerts.push(`${activeRisks} risque(s) actif(s) nécessitent un suivi.`);recommendations.push('Mettre à jour les plans de mitigation et les responsables des risques critiques.');}else strengths.push('Aucun risque actif signalé dans le registre.');
+    if(!recommendations.length)recommendations.push('Maintenir les revues de projet, sécuriser les jalons et confirmer les critères de mise en production.');
+    const summary=`Le projet "${data.name||'Projet'}" affiche ${progress}% d'avancement. ${spi>=0.95?'La trajectoire planning est maîtrisée.':'Un écart planning nécessite un plan de rattrapage.'}`;
+    return {summary,healthScoreEstimate,strengths,alerts,recommendations,criticalPathAdvice:'Vérifier les dépendances, la disponibilité des intervenants, les prérequis techniques, les fenêtres de changement et le plan de retour arrière.'};
   };
 
-  const prompt = `Tu es un Directeur de Projet Senior / PMO certifié PMP et Agile.
-Analyse les données du projet suivant en français et génère un audit de performance approfondi, des alertes de dérive (délais, budget, SPI/CPI), et des recommandations stratégiques concrètes.
+  const prompt = `Tu es un Directeur de Projet IT / Production senior.
+Analyse ce projet technique sans aucune analyse financière. Concentre-toi sur l'avancement, le planning, les jalons, les dépendances, la charge en heures, les risques techniques, la qualité, les prérequis et la préparation de mise en production.
 
 Données du projet :
 ${JSON.stringify(projectData, null, 2)}
 
-Réponds impérativement au format JSON valide avec la structure suivante :
+Réponds en JSON valide :
 {
-  "summary": "Synthèse globale de la santé du projet (2-3 phrases percutantes)",
+  "summary": "Synthèse de la santé opérationnelle du projet",
   "healthScoreEstimate": 85,
-  "strengths": ["point fort 1", "point fort 2"],
-  "alerts": ["alerte 1 sur les risques/délais", "alerte 2 sur le budget ou la vélocité"],
-  "recommendations": ["action corrective 1", "action corrective 2", "action corrective 3"],
-  "criticalPathAdvice": "Conseil spécifique pour optimiser le chemin critique et les jalons"
-}`;
+  "strengths": ["point fort planning ou technique"],
+  "alerts": ["alerte technique, planning ou ressource"],
+  "recommendations": ["action corrective concrète"],
+  "criticalPathAdvice": "Conseil sur le chemin critique, les dépendances et la mise en production"
+}
+`;
 
   const text = await callGeminiResilient({ prompt, isJson: true });
   if (text) {
@@ -1139,62 +1019,56 @@ app.post('/api/pm-ai/copil-report', async (req: Request, res: Response) => {
   const { projectData, audience = 'COPIL' } = req.body;
 
   const generateDynamicCopilReport = (data: any, aud: string) => {
-    const spi = Number(data?.spi) || 1.0;
-    const cpi = Number(data?.cpi) || 1.0;
-    const progress = Number(data?.progress) || 0;
-    const status = data?.status || 'IN_PROGRESS';
-    const totalBudget = Number(data?.totalBudget) || 0;
-    const spentBudget = Number(data?.spentBudget) || 0;
-    const completedTasks = Number(data?.completedTasksCount) || 0;
-    const totalTasks = Number(data?.totalTasksCount) || 0;
-    const activeRisks = Number(data?.activeRisksCount) || 0;
-
-    const weatherEmoji = (spi >= 0.95 && cpi >= 0.95) ? '🟢 Météo Favorable' : (spi < 0.9 && cpi < 0.9) ? '🔴 Météo Tempétueuse (Alerte)' : '🟠 Météo Variable';
-
-    return `## 📌 Flash Report Exécutif - ${data?.name || 'Projet'}
+    const spi=Number(data?.spi)||1;const progress=Number(data?.progress)||0;const status=data?.status||'IN_PROGRESS';const completedTasks=Number(data?.completedTasksCount)||0;const totalTasks=Number(data?.totalTasksCount)||0;const activeRisks=Number(data?.activeRisksCount)||0;const overdueTasks=Number(data?.overdueTasksCount)||0;
+    const weatherEmoji=spi>=0.98&&activeRisks===0&&overdueTasks===0?'🟢 Météo favorable':spi<0.9||activeRisks>=3?'🔴 Alerte opérationnelle':'🟠 Vigilance';
+    return `## 📌 Flash Report Projet - ${data?.name||'Projet'}
 **Destinataire :** ${aud}  
 **Date du rapport :** ${new Date().toLocaleDateString('fr-FR')}  
-**Météo Globale :** ${weatherEmoji} (${status})
+**Météo opérationnelle :** ${weatherEmoji} (${status})
 
 ---
 
-### 1. 🎯 Synthèse Exécutive
-Le projet affiche un taux d'avancement global de **${progress}%** avec **${completedTasks}/${totalTasks}** tâches d'ores et déjà clôturées. L'équipe reste mobilisée sur les phases de conception et de recette.
+### 1. Synthèse exécutive
+Avancement global : **${progress}%**. Tâches terminées : **${completedTasks}/${totalTasks}**.
 
-### 2. 📊 Indicateurs de Performance & Analyse EVM
-- **SPI (Performance Délais) :** \`${spi.toFixed(2)}\` ${spi >= 1 ? '*(Conforme au calendrier)*' : '*(Léger décalage à résorber)*'}
-- **CPI (Performance Coûts) :** \`${cpi.toFixed(2)}\` ${cpi >= 1 ? '*(Dépenses maîtrisées)*' : '*(Surveillance budgétaire requise)*'}
-- **Budget Alloué (BAC) :** ${totalBudget.toLocaleString('fr-FR')} €
-- **Coûts Réels Engagés (AC) :** ${spentBudget.toLocaleString('fr-FR')} € *(Reste à dépenser : ${(totalBudget - spentBudget).toLocaleString('fr-FR')} €)*
+### 2. Planning et jalons
+- **SPI planning :** ${spi.toFixed(2)} ${spi>=1?'(conforme ou en avance)':'(retard à résorber)'}
+- **Tâches en retard :** ${overdueTasks}
+- Vérifier les jalons à venir, les dépendances et le chemin critique.
 
-### 3. ⚠️ Risques Clés & Points d'Attention
-- **${activeRisks} risque(s) actif(s)** sous revue dans le registre opérationnel.
-- Priorité accordée à la stabilisation des dépendances et au respect des jalons du chemin critique.
+### 3. Risques et points d'attention
+- **${activeRisks} risque(s) actif(s)** dans le registre.
+- Priorité à la stabilité, aux prérequis techniques, à la disponibilité des ressources et aux validations.
 
-### 4. 🚀 Décisions Requises & Prochaines Échéances (S+2)
-1. Validation formelle du jalon d'étape par le commanditaire.
-2. Arbitrage sur l'allocation des compétences pour les développements finaux.
-3. Préparation de la phase de recette utilisateur et de déploiement.
+### 4. Préparation de mise en production
+- Confirmer les validations techniques et métier.
+- Vérifier le Change, les RITM, la fenêtre de déploiement et les intervenants.
+- Valider les tests, la supervision, le plan de communication et le rollback.
+
+### 5. Décisions et prochaines échéances
+Lister les arbitrages, responsables et dates cibles.
 `;
   };
 
-  const prompt = `Tu es un Chef de Projet d'Excellence. Rédige un Flash Report exécutif structuré en Markdown pour le ${audience} concernant le projet :
-Nom du projet : ${projectData?.name}
+  const prompt = `Tu es un Chef de Projet IT / Production. Rédige un compte rendu exécutif en Markdown pour le ${audience}, sans budget, coût, dépense ni analyse financière.
+
+Projet : ${projectData?.name}
 Objectif : ${projectData?.description || 'N/A'}
 Statut : ${projectData?.status}
 Avancement : ${projectData?.progress}%
-Budget total : ${projectData?.totalBudget} € | Dépensé : ${projectData?.spentBudget} €
+SPI planning : ${projectData?.spi}
 Tâches terminées : ${projectData?.completedTasksCount}/${projectData?.totalTasksCount}
-Nombre de risques actifs : ${projectData?.activeRisksCount || 0}
+Tâches en retard : ${projectData?.overdueTasksCount || 0}
+Risques actifs : ${projectData?.activeRisksCount || 0}
 
-Le rapport doit être professionnel, clair, avec des sections :
-1. Synthèse Exécutive (Météo du projet)
-2. Avancement des Jalons Majeurs
-3. Analyse Financière & Respect des Délais (EVM / SPI / CPI)
-4. Risques Majeurs & Plans d'Atténuation
-5. Décisions requises du Comité / Arbitrages
+Structure attendue :
+1. Synthèse exécutive et météo opérationnelle
+2. Avancement des jalons et planning
+3. Dépendances, risques techniques et plans d'atténuation
+4. Préparation de mise en production (tests, Change/RITM, fenêtre, rollback, communication)
+5. Décisions requises, responsables et prochaines échéances
 
-Sois précis, dynamique et orienté résultats.`;
+Sois précis, orienté production et factuel. Ne crée aucune donnée absente.`;
 
   const report = await callGeminiResilient({ prompt });
   if (report) {
