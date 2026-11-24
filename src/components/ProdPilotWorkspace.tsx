@@ -313,6 +313,26 @@ const normalizeRunbook = (value: any, owner = ''): MepRunbook => {
     events: Array.isArray(value.events) ? value.events.slice(-100) : [],
   };
 };
+const clockMinutes = (value: string) => {
+  const [hours, minutes] = String(value || '').split(':').map(Number);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : null;
+};
+const getTimelineBarStyle = (step: MepExecutionStep, runbook: MepRunbook): React.CSSProperties => {
+  const windowStart = clockMinutes(runbook.plannedStart) ?? 0;
+  let windowEnd = clockMinutes(runbook.plannedEnd) ?? 180;
+  if (windowEnd <= windowStart) windowEnd += 1440;
+  const start = clockMinutes(step.startTime);
+  if (start === null) return { left: '0%', width: '0%' };
+  let normalizedStart = start;
+  if (normalizedStart < windowStart) normalizedStart += 1440;
+  let end = clockMinutes(step.endTime);
+  if (end === null) end = normalizedStart + (runbook.timelineScale === 'Auto' ? 10 : Number(runbook.timelineScale));
+  else if (end < start) end += 1440;
+  const span = Math.max(1, windowEnd - windowStart);
+  const left = Math.max(0, Math.min(100, ((normalizedStart - windowStart) / span) * 100));
+  const width = Math.max(1.5, Math.min(100 - left, ((end - normalizedStart) / span) * 100));
+  return { left: `${left}%`, width: `${width}%` };
+};
 const getRunbookProgress = (runbook: MepRunbook) => {
   const items: MepRunbookStatus[] = [
     ...runbook.prerequisites.filter(x => x.title.trim()).map(x => x.status),
@@ -1731,7 +1751,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
                     <div className="flex items-center justify-between"><div><h4 className="text-sm font-black text-slate-900">2 · Étapes de l’opération</h4><p className="text-xs text-slate-500">Horodatage GO / FIN, acteur, référence, durée et statut.</p></div><button onClick={()=>addRunbookItem('executionSteps')} className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold">+ Étape</button></div>
                     <div className="overflow-x-auto"><table className="w-full text-xs min-w-[1050px]"><thead><tr className="text-left text-[10px] uppercase text-slate-500 border-b"><th className="p-2">N°</th><th className="p-2">Étape</th><th className="p-2">Référence</th><th className="p-2">Acteur</th><th className="p-2">Début</th><th className="p-2">Fin</th><th className="p-2">Durée</th><th className="p-2">Statut</th><th className="p-2">Actions</th></tr></thead><tbody>{selectedRunbook.executionSteps.map((step,i)=>{const duration=step.startTime&&step.endTime?Math.round((new Date(`1970-01-01T${step.endTime}:00`).getTime()-new Date(`1970-01-01T${step.startTime}:00`).getTime())/60000):null;return <tr key={step.id} className="border-b border-slate-100"><td className="p-2 font-bold text-indigo-600">{i+1}</td><td className="p-1"><input value={step.title} onChange={e=>updateRunbookCollection('executionSteps',step.id,{title:e.target.value})} className="w-64 p-2 border rounded" /></td><td className="p-1"><input value={step.reference} onChange={e=>updateRunbookCollection('executionSteps',step.id,{reference:e.target.value})} placeholder="Référence / ticket" className="w-32 p-2 border rounded" /></td><td className="p-1"><input value={step.actor} onChange={e=>updateRunbookCollection('executionSteps',step.id,{actor:e.target.value})} placeholder="Acteur" className="w-36 p-2 border rounded" /></td><td className="p-1"><input type="time" value={step.startTime} onChange={e=>updateRunbookCollection('executionSteps',step.id,{startTime:e.target.value})} className="p-2 border rounded" /></td><td className="p-1"><input type="time" value={step.endTime} onChange={e=>updateRunbookCollection('executionSteps',step.id,{endTime:e.target.value})} className="p-2 border rounded" /></td><td className="p-2 font-mono">{duration===null?'—':duration<0?duration+1440:duration+' min'}</td><td className="p-1"><select value={step.status} onChange={e=>updateRunbookCollection('executionSteps',step.id,{status:e.target.value as MepRunbookStatus})} className="p-2 border rounded">{RUNBOOK_STATUSES.map(s=><option key={s}>{s}</option>)}</select></td><td className="p-1 whitespace-nowrap"><button onClick={()=>recordRunbookStep(step,'GO')} className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 font-bold mr-1">GO</button><button onClick={()=>recordRunbookStep(step,'FIN')} className="px-2 py-1 rounded bg-sky-50 text-sky-700 font-bold mr-1">FIN</button><button onClick={()=>removeRunbookItem('executionSteps',step.id)} className="p-1 text-rose-600"><X className="w-4 h-4"/></button></td></tr>})}</tbody></table></div>
-                    <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-bold text-slate-700 mb-2">Frise horaire — fenêtre {selectedRunbook.plannedStart} à {selectedRunbook.plannedEnd} · pas {selectedRunbook.timelineScale==='Auto'?'automatique':selectedRunbook.timelineScale+' min'}</div><div className="space-y-2">{selectedRunbook.executionSteps.map((s,i)=><div key={s.id} className="grid grid-cols-[28px_1fr_120px] gap-2 items-center text-[11px]"><span className="font-mono text-slate-400">{i+1}</span><div className="min-w-0"><div className="font-semibold text-slate-700 truncate">{s.title}</div><div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1"><div className={`h-full rounded-full ${s.status==='KO'?'bg-rose-500':s.status==='OK'?'bg-emerald-500':s.status==='En cours'?'bg-sky-500':'bg-indigo-300'}`} style={{width:s.status==='OK'?'100%':s.status==='En cours'?'50%':'0%'}} /></div></div><span className="font-mono text-right text-slate-500">{s.startTime||'--:--'} → {s.endTime||'--:--'}</span></div>)}</div></div>
+                    <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-bold text-slate-700 mb-2">Frise horaire — fenêtre {selectedRunbook.plannedStart} à {selectedRunbook.plannedEnd} · pas {selectedRunbook.timelineScale==='Auto'?'automatique':selectedRunbook.timelineScale+' min'}</div><div className="space-y-2">{selectedRunbook.executionSteps.map((s,i)=><div key={s.id} className="grid grid-cols-[28px_1fr_120px] gap-2 items-center text-[11px]"><span className="font-mono text-slate-400">{i+1}</span><div className="min-w-0"><div className="font-semibold text-slate-700 truncate">{s.title}</div><div className="h-2 bg-slate-200 rounded-full relative overflow-hidden mt-1"><div className={`absolute top-0 bottom-0 rounded-full ${s.status==='KO'?'bg-rose-500':s.status==='OK'?'bg-emerald-500':s.status==='En cours'?'bg-sky-500':'bg-indigo-300'}`} style={getTimelineBarStyle(s,selectedRunbook)} /></div></div><span className="font-mono text-right text-slate-500">{s.startTime||'--:--'} → {s.endTime||'--:--'}</span></div>)}</div></div>
                   </div>
                 </div>
               )}
