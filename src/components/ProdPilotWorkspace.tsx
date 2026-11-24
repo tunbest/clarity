@@ -61,6 +61,16 @@ export interface MepPerson {
   role: string;
 }
 
+export interface MepItsmReference {
+  id: string;
+  type: 'CHANGE' | 'RITM';
+  number: string;
+  status: string;
+  serviceNowUrl?: string;
+  source: 'MANUAL';
+  updatedAt: string;
+}
+
 export interface MepTask {
   id: string;
   title: string;
@@ -163,6 +173,7 @@ export interface MepEntry {
   goNoGo: 'En attente' | 'GO' | 'NO-GO';
   changeNumbers: string;
   ritmNumbers: string;
+  itsmReferences?: MepItsmReference[];
   rollback: string;
   description: string;
   people: MepPerson[];
@@ -364,6 +375,24 @@ const getMepProgress = (m: MepEntry) => {
   return Math.round((ts.filter((t) => t.status === 'Terminé').length / ts.length) * 100);
 };
 
+const parseItsmNumbers = (value: unknown): string[] => Array.from(new Set(String(value || '').split(/[\\n,;\\s]+/).map((item) => item.trim().toUpperCase()).filter(Boolean)));
+
+const normalizeItsmReferences = (value: unknown, changeNumbers: string, ritmNumbers: string): MepItsmReference[] => {
+  const existing = Array.isArray(value) ? value : [];
+  const byKey = new Map<string, MepItsmReference>();
+  existing.forEach((item: any) => {
+    const type = item?.type === 'RITM' ? 'RITM' : 'CHANGE';
+    const number = String(item?.number || '').trim().toUpperCase();
+    if (!number) return;
+    byKey.set(`${type}:${number}`, { id: String(item?.id || uid('ITSM')), type, number, status: String(item?.status || 'À vérifier'), serviceNowUrl: String(item?.serviceNowUrl || ''), source: 'MANUAL', updatedAt: String(item?.updatedAt || new Date().toISOString()) });
+  });
+  [...parseItsmNumbers(changeNumbers).map((number) => ({ type: 'CHANGE' as const, number })), ...parseItsmNumbers(ritmNumbers).map((number) => ({ type: 'RITM' as const, number }))].forEach(({ type, number }) => {
+    const key = `${type}:${number}`;
+    if (!byKey.has(key)) byKey.set(key, { id: uid('ITSM'), type, number, status: 'À vérifier', serviceNowUrl: '', source: 'MANUAL', updatedAt: new Date().toISOString() });
+  });
+  return Array.from(byKey.values());
+};
+
 const normalizeMep = (x: any, projects: Project[]): MepEntry => {
   const project = projects.find((p) => p.id === x.projectId) || projects.find((p) => p.name === x.project);
   const id = String(x.id || uid('MEP'));
@@ -381,8 +410,9 @@ const normalizeMep = (x: any, projects: Project[]): MepEntry => {
     status: MEP_STATUSES.includes(x.status) ? x.status : 'Brouillon',
     priority: ['Critique', 'Haute', 'Normale', 'Basse'].includes(x.priority) ? x.priority : 'Normale',
     goNoGo: ['En attente', 'GO', 'NO-GO'].includes(x.goNoGo) ? x.goNoGo : 'En attente',
-    changeNumbers: String(x.changeNumbers || x.changeRef || ''),
-    ritmNumbers: String(x.ritmNumbers || ''),
+    changeNumbers: parseItsmNumbers(x.changeNumbers || x.changeRef || '').join(', '),
+    ritmNumbers: parseItsmNumbers(x.ritmNumbers || '').join(', '),
+    itsmReferences: normalizeItsmReferences(x.itsmReferences, String(x.changeNumbers || x.changeRef || ''), String(x.ritmNumbers || '')),
     rollback: String(x.rollback || ''),
     description: String(x.description || ''),
     people: Array.isArray(x.people) ? x.people.map((p: any) => ({ name: String(p?.name || ''), role: String(p?.role || '') })) : [],
@@ -737,6 +767,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       goNoGo: 'En attente',
       changeNumbers: '',
       ritmNumbers: '',
+      itsmReferences: [],
       tasks: (source.tasks || []).map((task) => ({ ...task, id: uid('TASK'), status: 'À faire', projectTaskId: undefined, projectMilestoneId: undefined })),
       minutes: [],
       runbook: clonedRunbook,
@@ -831,6 +862,9 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       .filter((p) => p.name.trim())
       .map((p) => ({ name: p.name.trim(), role: (p.role || '').trim() }));
     const cleanTasks = taskDraft.map(normalizeTask);
+    const cleanChanges = parseItsmNumbers(mepForm.changeNumbers || '');
+    const cleanRitms = parseItsmNumbers(mepForm.ritmNumbers || '');
+    const itsmReferences = normalizeItsmReferences(mepForm.itsmReferences, cleanChanges.join(', '), cleanRitms.join(', '));
     const existingMep = db.mep.find((m) => m.id === editMepId);
     const mepId = existingMep?.id || uid('MEP');
     const mepRef = existingMep?.ref || `MEP-${mepId.slice(-5)}`;
@@ -850,6 +884,9 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
           ? {
               ...m,
               ...mepForm,
+              changeNumbers: cleanChanges.join(', '),
+              ritmNumbers: cleanRitms.join(', '),
+              itsmReferences,
               projectId: (mepForm.projectId || '').trim(),
               project: clarityProjects.find((p) => p.id === mepForm.projectId)?.name || '',
               people: cleanPeople,
@@ -874,8 +911,9 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         status: (mepForm.status as MepStatus) || 'Brouillon',
         priority: (mepForm.priority as any) || 'Normale',
         goNoGo: (mepForm.goNoGo as any) || 'En attente',
-        changeNumbers: (mepForm.changeNumbers || '').trim(),
-        ritmNumbers: (mepForm.ritmNumbers || '').trim(),
+        changeNumbers: cleanChanges.join(', '),
+        ritmNumbers: cleanRitms.join(', '),
+        itsmReferences,
         rollback: (mepForm.rollback || '').trim(),
         description: (mepForm.description || '').trim(),
         people: cleanPeople,
@@ -2838,22 +2876,22 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Numéro(s) de Change ServiceNow</label>
-                  <input
-                    type="text"
+                  <textarea
+                    rows={2}
                     value={mepForm.changeNumbers || ''}
                     onChange={(e) => setMepForm({ ...mepForm, changeNumbers: e.target.value })}
-                    placeholder="ex: CHG0048921"
+                    placeholder="Un numéro par ligne : CHG0048921, CHG0048922"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">Référence(s) RITM (facultatif)</label>
-                  <input
-                    type="text"
+                  <textarea
+                    rows={2}
                     value={mepForm.ritmNumbers || ''}
                     onChange={(e) => setMepForm({ ...mepForm, ritmNumbers: e.target.value })}
-                    placeholder="ex: RITM0112450"
+                    placeholder="Une référence par ligne : RITM0112450, RITM0112451"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
                 </div>
