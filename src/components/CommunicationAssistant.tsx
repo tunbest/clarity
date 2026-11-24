@@ -211,15 +211,16 @@ ${JSON.stringify(buildContext(), null, 2)}`;
       return;
     }
     const recipients = recipientText
-      .split(/[;,\\n]/)
+      .split(/[;,\n]/)
       .map((email) => email.trim())
       .filter(Boolean)
-      .join(';');
+      .map((email) => encodeURIComponent(email))
+      .join(',');
     const params = new URLSearchParams({
       subject: draft.subject,
       body: draft.body,
     });
-    const mailto = `mailto:${encodeURIComponent(recipients)}?${params.toString()}`;
+    const mailto = `mailto:${recipients}?${params.toString()}`;
     setMessage('Ouverture du client de messagerie… Vérifiez le brouillon dans Outlook avant tout envoi.');
     window.location.href = mailto;
   };
