@@ -130,7 +130,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         ];
       case 'CHEF_PROJET_PROD':
         return [
-          { id: 'prod_releases', label: 'Pilotage MEP', icon: Rocket },
+          { id: 'dashboard', label: 'Vue projet & KPIs', icon: LayoutDashboard },
+          { id: 'kanban', label: 'Kanban projet', icon: FolderKanban },
+          { id: 'gantt', label: 'Planning & jalons', icon: Calendar },
+          { id: 'tasks', label: 'Tâches projet', icon: ListTodo },
+          { id: 'risks', label: 'Risques', icon: ShieldAlert },
+          { id: 'team', label: 'Équipe projet', icon: Users },
+          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
       case 'CONTRIBUTEUR':
         return [
@@ -145,6 +151,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           { id: 'tasks', label: 'Grille WBS & Tâches', icon: ListTodo },
           { id: 'risks', label: 'Matrice des Risques', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
           { id: 'workload', label: 'Charge & Ressources', icon: Users },
+          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
     }
   }, [userRole, criticalRisks]);
@@ -198,13 +205,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-blue-800 bg-blue-50 px-3 py-1 rounded-lg border border-blue-200">
                   Espace Collaborateur
-                </span>
-              </div>
-            ) : userRole === 'CHEF_PROJET_PROD' ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 flex items-center gap-1.5 shrink-0">
-                  <Rocket className="w-4 h-4 text-amber-600" />
-                  <span>Pilotage MEP — CP Production</span>
                 </span>
               </div>
             ) : !isPortfolioView ? (
