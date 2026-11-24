@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
 import { CopilotStudioClient, ConnectionSettings } from '@microsoft/agents-copilotstudio-client';
 import { Copy, Mail, FileText, Sparkles, Save, Settings2, Loader2, ExternalLink } from 'lucide-react';
@@ -47,6 +47,10 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
 
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
   const selectedProject = useMemo(() => projects.find((p) => p.id === (mode === 'coproj' ? selectedProjectId : selectedMep?.projectId)), [projects, mode, selectedProjectId, selectedMep]);
+
+  useEffect(() => {
+    if (meps.length && !meps.some((m) => m.id === selectedMepId)) setSelectedMepId(meps[0].id);
+  }, [meps, selectedMepId]);
 
   const saveSettings = () => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -261,7 +265,7 @@ ${JSON.stringify(buildContext(), null, 2)}`;
           ] as const).map(([key, label]) => (
             <label key={key} className="text-[11px] font-bold text-slate-600 space-y-1">
               {label}
-              <input value={settings[key]} onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800" placeholder={key === 'schemaName' ? 'cr299_clarity_tB6p_X' : 'À renseigner'} />
+              <input value={settings[key]} onChange={(e) => { setSettings((s) => ({ ...s, [key]: e.target.value })); setMsal(null); setConnected(false); }} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800" placeholder={key === 'schemaName' ? 'cr299_clarity_tB6p_X' : 'À renseigner'} />
             </label>
           ))}
         </div>
