@@ -274,6 +274,12 @@ app.put('/api/workspace', async (req: Request,res: Response) => {
   if(!Array.isArray(projects) || projects.length>500 || !Number.isSafeInteger(revision) || revision<1 || projects.some((p:any)=>!p || typeof p!=='object' || typeof p.id!=='string' || typeof p.name!=='string' || p.id.length>128 || p.name.length>300)) return res.status(400).json({error:'Données de portefeuille invalides.'});
   const pool=getPgPool()!;
   const retainedIds = new Set<string>(projects.map((p:any) => String(p.id)));
+  const currentWorkspace = await pool.query('SELECT projects FROM workspace_state WHERE id=1');
+  const currentProjects: any[] = currentWorkspace.rows[0]?.projects || [];
+  const removedProjects = currentProjects.filter((p: any) => !retainedIds.has(String(p.id)));
+  if (removedProjects.length && !RBAC.canCreateOrDeleteProject(getUserFromRequest(req).role || 'CONTRIBUTEUR')) {
+    return res.status(403).json({ error: 'Seuls le Directeur de Projets ou l’Administrateur peuvent supprimer un projet.' });
+  }
   const mepResult = await pool.query('SELECT meps FROM mep_workspace_state WHERE id=1');
   const linkedMeps: any[] = mepResult.rows[0]?.meps || [];
   const orphaned = linkedMeps.filter((m:any) => !retainedIds.has(String(m.projectId)));
