@@ -108,7 +108,7 @@ class ResilientProjectStore {
       action: 'CREATE_PROJECT',
       entityType: 'PROJECT',
       entityId: newProject.id,
-      details: { name: newProject.name, code: newProject.code, budget: newProject.totalBudget },
+      details: { name: newProject.name, code: newProject.code },
     });
 
     return newProject;
@@ -236,7 +236,7 @@ class ResilientProjectStore {
       action: 'ADD_RESOURCE',
       entityType: 'TEAM_MEMBER',
       entityId: member.id,
-      details: { projectId, name: member.name, role: member.role, hourlyRate: member.hourlyRate },
+      details: { projectId, name: member.name, role: member.role },
     });
 
     return member;
