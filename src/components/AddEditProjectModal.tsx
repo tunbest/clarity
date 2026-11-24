@@ -86,8 +86,6 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
   const [endDate, setEndDate] = useState(
     project?.endDate || new Date(Date.now() + 180 * 24 * 3600 * 1000).toISOString().split('T')[0]
   );
-  const [totalBudget, setTotalBudget] = useState(project?.totalBudget || 150000);
-  const [currency, setCurrency] = useState(project?.currency || '€');
   const [scopeId, setScopeId] = useState(project?.scopeId || '');
   const [trigrams, setTrigrams] = useState<string[]>(project?.trigrams || []);
   const selectedScope = scopes.find((scope) => scope.id === scopeId);
@@ -240,8 +238,6 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
       methodology,
       startDate,
       endDate,
-      totalBudget: Number(totalBudget) || 100000,
-      currency,
       kpiWidgets: project?.kpiWidgets || DEFAULT_KPI_WIDGETS,
       tasks: project?.tasks || [],
       milestones: project?.milestones || [],
@@ -550,33 +546,6 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
-              />
-            </div>
-          </div>
-
-          {/* Budget BAC */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Budget Total Alloué (BAC) *
-              </label>
-              <input
-                type="number"
-                min="0"
-                required
-                value={totalBudget}
-                onChange={(e) => setTotalBudget(Number(e.target.value))}
-                className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-xl font-black text-slate-900"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Devise</label>
-              <input
-                type="text"
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-                className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-xl font-bold text-center"
               />
             </div>
           </div>
