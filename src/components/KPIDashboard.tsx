@@ -6,12 +6,17 @@ import {
 } from '../types';
 import { formatDateFR } from '../utils/pmCalculations';
 import { 
-  ResponsiveContainer, 
-  PieChart, 
-  Pie, 
-  Cell, 
-  BarChart, 
-  Bar 
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar
 } from 'recharts';
 import { 
   Activity, 
