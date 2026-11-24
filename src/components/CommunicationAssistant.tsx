@@ -86,7 +86,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         `RITM : ${displayValue(m.ritmNumbers)}`,
         `Pilote : ${displayValue(m.owner)}`,
         `Téléphone du pilotage : ${displayValue(runbook.pilotPhone)}`,
-        `Trigramme / code application : ${displayValue([runbook.trigram, runbook.applicationCode].filter(Boolean).join(' / '))}`,
+        `Trigrammes / code application : ${displayValue([...(m.trigrams || []), runbook.trigram, runbook.applicationCode].filter(Boolean).join(' / '))}`,
         '',
         start ? 'PRÉREQUIS ET VALIDATIONS' : 'RÉSULTAT ET CONTRÔLES',
         ...(start ? (prerequisites.length ? prerequisites : ['• Prérequis à confirmer avec le pilotage.']) : [
