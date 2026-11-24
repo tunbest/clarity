@@ -71,6 +71,8 @@ export interface MepTask {
   duration: number;
   status: MepTaskStatus;
   notes: string;
+  projectTaskId?: string;
+  projectMilestoneId?: string;
 }
 
 export interface MepMinute {
@@ -120,6 +122,7 @@ interface ProdPilotWorkspaceProps {
   currentUser: AppUser;
   projects?: Project[];
   activeProjectId?: string;
+  onUpdateProject?: (project: Project) => void;
 }
 
 const MEP_STATUSES: MepStatus[] = [
@@ -178,6 +181,8 @@ const normalizeTask = (t: Partial<MepTask>): MepTask => ({
     ? (t.status as MepTaskStatus)
     : 'À faire',
   notes: t.notes || '',
+  projectTaskId: t.projectTaskId || undefined,
+  projectMilestoneId: t.projectMilestoneId || undefined,
 });
 
 const createDefaultTasks = (): MepTask[] =>
@@ -233,6 +238,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   currentUser,
   projects: clarityProjects = [],
   activeProjectId,
+  onUpdateProject,
 }) => {
   const [db, setDb] = useState<ProdPilotDb>({ mep: [], kanban: [] });
   const [mepLoaded, setMepLoaded] = useState(false);
@@ -487,6 +493,34 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     setIsMepModalOpen(true);
   };
 
+  const syncLinkedProjectData = (mep: MepEntry, tasks: MepTask[]) => {
+    const project = clarityProjects.find((item) => item.id === mep.projectId);
+    if (!project || !onUpdateProject) return;
+    const nextTasks = project.tasks.map((projectTask) => {
+      const linked = tasks.find((task) => task.projectTaskId === projectTask.id);
+      if (!linked) return projectTask;
+      const dates = getTaskDates(mep, linked);
+      const status = linked.status === 'Terminé' ? 'DONE'
+        : linked.status === 'En cours' ? 'IN_PROGRESS'
+        : linked.status === 'En validation' ? 'REVIEW' : 'TODO';
+      return {
+        ...projectTask,
+        status,
+        startDate: dates.start,
+        dueDate: dates.end,
+        completionPercent: status === 'DONE' ? 100 : status === 'IN_PROGRESS' ? Math.max(projectTask.completionPercent || 0, 50) : status === 'REVIEW' ? Math.max(projectTask.completionPercent || 0, 90) : 0,
+      };
+    });
+    const nextMilestones = project.milestones.map((milestone) => {
+      const linked = tasks.find((task) => task.kind === 'Jalon' && task.projectMilestoneId === milestone.id);
+      if (!linked) return milestone;
+      const dates = getTaskDates(mep, linked);
+      const completed = linked.status === 'Terminé';
+      return { ...milestone, targetDate: dates.start, completed, actualDate: completed ? (milestone.actualDate || dates.start) : undefined };
+    });
+    onUpdateProject({ ...project, tasks: nextTasks, milestones: nextMilestones, updatedAt: new Date().toISOString() });
+  };
+
   const handleSaveMep = (e: React.FormEvent) => {
     e.preventDefault();
     if (!mepForm.projectId || !clarityProjects.some((p) => p.id === mepForm.projectId)) { showToast('Sélectionnez un projet Clarity existant.'); return; }
@@ -495,6 +529,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       .filter((p) => p.name.trim())
       .map((p) => ({ name: p.name.trim(), role: (p.role || '').trim() }));
     const cleanTasks = taskDraft.map(normalizeTask);
+    const targetProject = clarityProjects.find((p) => p.id === mepForm.projectId);
+    if (targetProject) syncLinkedProjectData({ ...(db.mep.find((m) => m.id === editMepId) || {} as MepEntry), ...mepForm, projectId: targetProject.id, date: mepForm.date || isoToday() } as MepEntry, cleanTasks);
 
     if (editMepId) {
       const updatedMeps = db.mep.map((m) =>
@@ -567,10 +603,11 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
 
   // Kanban Task Status update
   const handleMoveKanbanTask = (taskId: string, newStatus: MepTaskStatus) => {
-    const updated = db.mep.map((m) => ({
-      ...m,
-      tasks: (m.tasks || []).map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)),
-    }));
+    const updated = db.mep.map((m) => {
+      const tasks = (m.tasks || []).map((t) => (t.id === taskId ? { ...t, status: newStatus } : t));
+      if (tasks.some((t, index) => t.id === taskId && t.status === newStatus)) syncLinkedProjectData(m, tasks);
+      return { ...m, tasks };
+    });
     persistDb({ ...db, mep: updated });
     showToast('Avancement mis à jour');
   };
@@ -3123,6 +3160,38 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                           }}
                           className="text-xs p-2 rounded-lg border border-slate-300 bg-white font-mono"
                         />
+                        <select
+                          value={t.projectTaskId || ''}
+                          title="Lier à une tâche du projet général"
+                          onChange={(e) => {
+                            const next = [...taskDraft];
+                            next[i].projectTaskId = e.target.value || undefined;
+                            setTaskDraft(next);
+                          }}
+                          className="text-xs p-2 rounded-lg border border-slate-300 bg-white"
+                        >
+                          <option value="">Tâche projet : aucune</option>
+                          {(clarityProjects.find((p) => p.id === mepForm.projectId)?.tasks || []).map((projectTask) => (
+                            <option key={projectTask.id} value={projectTask.id}>{projectTask.title}</option>
+                          ))}
+                        </select>
+                        {t.kind === 'Jalon' && (
+                          <select
+                            value={t.projectMilestoneId || ''}
+                            title="Lier à un jalon du projet général"
+                            onChange={(e) => {
+                              const next = [...taskDraft];
+                              next[i].projectMilestoneId = e.target.value || undefined;
+                              setTaskDraft(next);
+                            }}
+                            className="text-xs p-2 rounded-lg border border-slate-300 bg-white"
+                          >
+                            <option value="">Jalon projet : aucun</option>
+                            {(clarityProjects.find((p) => p.id === mepForm.projectId)?.milestones || []).map((milestone) => (
+                              <option key={milestone.id} value={milestone.id}>{milestone.title}</option>
+                            ))}
+                          </select>
+                        )}
                         <select
                           value={t.status}
                           onChange={(e) => {
