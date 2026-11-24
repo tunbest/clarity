@@ -27,7 +27,6 @@ export const AddEditRiskModal: React.FC<AddEditRiskModalProps> = ({
   const [mitigationPlan, setMitigationPlan] = useState(existingRisk?.mitigationPlan || '');
   const [contingencyPlan, setContingencyPlan] = useState(existingRisk?.contingencyPlan || '');
   const [ownerId, setOwnerId] = useState(existingRisk?.ownerId || '');
-  const [financialImpact, setFinancialImpact] = useState<number>(existingRisk?.financialImpact || 10000);
   const [status, setStatus] = useState<RiskStatus>(existingRisk?.status || 'ACTIVE');
 
   const riskScore = probability * impact;
@@ -47,7 +46,6 @@ export const AddEditRiskModal: React.FC<AddEditRiskModalProps> = ({
       mitigationPlan: mitigationPlan.trim(),
       contingencyPlan: contingencyPlan.trim(),
       ownerId: ownerId || undefined,
-      financialImpact: Number(financialImpact) || 0,
       status,
       identifiedDate: existingRisk?.identifiedDate || new Date().toISOString().split('T')[0],
     };
@@ -108,7 +106,6 @@ export const AddEditRiskModal: React.FC<AddEditRiskModalProps> = ({
               >
                 <option value="TECHNIQUE">Technique</option>
                 <option value="DELAIS">Délais / Planning</option>
-                <option value="BUDGET">Budget / Coûts</option>
                 <option value="RESSOURCES">Ressources humaines</option>
                 <option value="JURIDIQUE">Juridique / RGPD</option>
                 <option value="FOURNISSEUR">Fournisseur externe</option>
@@ -185,34 +182,17 @@ export const AddEditRiskModal: React.FC<AddEditRiskModalProps> = ({
             />
           </div>
 
-          {/* Owner & Financial impact */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Porteur du risque</label>
-              <select
-                value={ownerId}
-                onChange={(e) => setOwnerId(e.target.value)}
-                className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-xl"
-              >
-                <option value="">Non assigné</option>
-                {project.members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Impact Financier Max (€)</label>
-              <input
-                type="number"
-                min="0"
-                value={financialImpact}
-                onChange={(e) => setFinancialImpact(Number(e.target.value))}
-                className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
-              />
-            </div>
+          {/* Risk owner */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Porteur du risque</label>
+            <select
+              value={ownerId}
+              onChange={(e) => setOwnerId(e.target.value)}
+              className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-xl"
+            >
+              <option value="">Non assigné</option>
+              {project.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
           </div>
 
           {/* Footer Submit */}
