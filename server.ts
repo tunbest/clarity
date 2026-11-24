@@ -380,6 +380,7 @@ app.post('/api/workspace/import', async (req: Request, res: Response) => {
   }
   const projects = req.body?.projects;
   const meps = req.body?.meps;
+  const scopes = req.body?.scopes;
   const workspaceRevision = Number(req.body?.workspaceRevision);
   const mepRevision = Number(req.body?.mepRevision);
   if (!Array.isArray(projects) || !Array.isArray(meps) || projects.length > 500 || meps.length > 5000 ||
@@ -388,6 +389,7 @@ app.post('/api/workspace/import', async (req: Request, res: Response) => {
       projects.some((p: any) => !p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name || p.id.length > 128 || p.name.length > 300)) {
     return res.status(400).json({ error: 'Format JSON Clarity invalide : projets, MEP ou versions manquants.' });
   }
+  if (scopes !== undefined && (!Array.isArray(scopes) || scopes.length > 300 || scopes.some((s:any) => !s || typeof s.id !== 'string' || typeof s.code !== 'string' || typeof s.name !== 'string' || !Array.isArray(s.trigrams)))) return res.status(400).json({ error: 'Structure des périmètres invalide dans le JSON.' });
   const projectIds = new Set<string>();
   for (const project of projects) {
     if (projectIds.has(project.id)) return res.status(400).json({ error: 'Identifiant projet dupliqué dans le JSON.' });
@@ -407,6 +409,7 @@ app.post('/api/workspace/import', async (req: Request, res: Response) => {
     await client.query('BEGIN');
     const workspace = await client.query('SELECT revision FROM workspace_state WHERE id=1 FOR UPDATE');
     const mepState = await client.query('SELECT revision FROM mep_workspace_state WHERE id=1 FOR UPDATE');
+    if (scopes !== undefined) await client.query('SELECT revision FROM portfolio_scope_state WHERE id=1 FOR UPDATE');
     if (!workspace.rowCount || !mepState.rowCount) {
       await client.query('ROLLBACK');
       return res.status(503).json({ error: 'Espace de travail non initialisé. Rechargez Clarity puis réessayez.' });
@@ -417,6 +420,7 @@ app.post('/api/workspace/import', async (req: Request, res: Response) => {
     }
     const p = await client.query('UPDATE workspace_state SET projects=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 RETURNING revision', [JSON.stringify(projects)]);
     const m = await client.query('UPDATE mep_workspace_state SET meps=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 RETURNING revision', [JSON.stringify(meps)]);
+    if (scopes !== undefined) await client.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1', [JSON.stringify(scopes)]);
     await client.query('COMMIT');
     res.json({ success: true, workspaceRevision: Number(p.rows[0].revision), mepRevision: Number(m.rows[0].revision), projects: projects.length, meps: meps.length });
   } catch (error) {
