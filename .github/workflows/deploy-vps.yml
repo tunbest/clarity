@@ -86,7 +86,7 @@ jobs:
           git fetch origin "$DEPLOY_SHA"
           git checkout --detach --force "$DEPLOY_SHA"
 
-          for file in Dockerfile package.json scripts/build-server.mjs src/db/schema.sql; do
+          for file in Dockerfile package.json scripts/build-server.mjs server.ts src/db/dbClient.ts; do
             test -f "$APP_DIR/$file" || { echo "Required source file missing: $file" >&2; exit 1; }
           done
           test -f "$APP_DIR/.dockerignore" || { echo ".dockerignore is missing; refusing to build with a potentially unsafe context." >&2; exit 1; }
