@@ -3,7 +3,7 @@ export type ProjectLifecycleStatus = 'Planning' | 'Execution' | 'Monitoring' | '
 export type PriorityLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'DONE' | 'BLOCKED';
 export type Methodology = 'AGILE' | 'WATERFALL' | 'HYBRID';
-export type RiskCategory = 'TECHNIQUE' | 'BUDGET' | 'DELAIS' | 'RESSOURCES' | 'JURIDIQUE' | 'EXTERNE';
+export type RiskCategory = 'TECHNIQUE' | 'DELAIS' | 'RESSOURCES' | 'JURIDIQUE' | 'EXTERNE';
 export type RiskStatus = 'ACTIVE' | 'MITIGATED' | 'CLOSED' | 'OCCURRED';
 
 export interface Subtask {
@@ -26,8 +26,6 @@ export interface Task {
   estimatedHours: number;
   actualHours: number;
   completionPercent: number; // 0 - 100
-  costEstimated?: number;
-  costActual?: number;
   category?: string;
   tags: string[];
   subtasks?: Subtask[];
@@ -57,7 +55,6 @@ export interface Risk {
   mitigationPlan: string;
   contingencyPlan?: string;
   ownerId?: string;
-  financialImpact?: number;
   status: RiskStatus;
   identifiedDate?: string;
 }
@@ -68,7 +65,6 @@ export interface TeamMember {
   role: string;
   email: string;
   avatarUrl?: string;
-  hourlyRate: number;
   maxWeeklyHours: number;
   color: string;
 }
@@ -81,7 +77,6 @@ export type WidgetType =
   | 'TASK_STATUS_PIE' 
   | 'RISK_HEATMAP' 
   | 'MILESTONE_TIMELINE' 
-  | 'BUDGET_BURN_GAUGE' 
   | 'SPI_CPI_RADAR';
 
 export interface KPIWidget {
@@ -126,8 +121,6 @@ export interface Project {
   methodology: Methodology;
   startDate: string;
   endDate: string;
-  totalBudget: number; // BAC (Budget at Completion)
-  currency: string;
   members: TeamMember[];
   tasks: Task[];
   milestones: Milestone[];
@@ -138,18 +131,9 @@ export interface Project {
 }
 
 export interface ProjectMetrics {
-  // Earned Value Management (EVM)
-  BAC: number; // Budget at Completion (Budget total alloué)
-  PV: number;  // Planned Value (Valeur planifiée à date)
-  EV: number;  // Earned Value (Valeur acquise)
-  AC: number;  // Actual Cost (Coût réel constaté)
-  CV: number;  // Cost Variance (EV - AC)
-  SV: number;  // Schedule Variance (EV - PV)
-  CPI: number; // Cost Performance Index (EV / AC)
-  SPI: number; // Schedule Performance Index (EV / PV)
-  EAC: number; // Estimate at Completion (BAC / CPI)
-  ETC: number; // Estimate to Complete (EAC - AC)
-  VAC: number; // Variance at Completion (BAC - EAC)
+  // Indicateurs de planning uniquement, sans valorisation financière
+  SPI: number; // Avancement réel / avancement théorique
+  SV: number; // Écart d'avancement en points de pourcentage
   
   // Progress & Counts
   progressPercent: number;
@@ -364,7 +348,6 @@ export interface IACopilotConfig {
   features: {
     wbsGeneration: boolean;
     copilReporting: boolean;
-    earnedValueAudit: boolean;
     riskPrediction: boolean;
     resourceBalancing: boolean;
   };
@@ -380,7 +363,6 @@ export interface SystemAdminSettings {
   governance: {
     directorCanManageProjects: boolean;
     directorCanAllocateResources: boolean;
-    requireDirectorApprovalForBudget: boolean;
     maxProjectsPerDirector: number;
     auditLogRetentionDays: number;
   };
