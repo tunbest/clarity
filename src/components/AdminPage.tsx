@@ -84,7 +84,6 @@ const DEFAULT_ADMIN_SETTINGS: SystemAdminSettings = {
     features: {
       wbsGeneration: true,
       copilReporting: true,
-      earnedValueAudit: true,
       riskPrediction: true,
       resourceBalancing: true,
     },
@@ -96,7 +95,6 @@ const DEFAULT_ADMIN_SETTINGS: SystemAdminSettings = {
   governance: {
     directorCanManageProjects: true,
     directorCanAllocateResources: true,
-    requireDirectorApprovalForBudget: true,
     maxProjectsPerDirector: 15,
     auditLogRetentionDays: 90,
   },
@@ -391,8 +389,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
                     <option value="ADMINISTRATEUR">🛡️ Administrateur Système (Console Admin & Profils)</option>
-                    <option value="DIRECTEUR_PROJETS">⭐ Directeur de Projets (Portefeuille, Budget BAC & Stratégie)</option>
-                    <option value="PMO">📊 PMO (Portefeuille, EVM, Risques & Jalons)</option>
+                    <option value="DIRECTEUR_PROJETS">⭐ Directeur de Projets (Portefeuille & Stratégie)</option>
+                    <option value="PMO">📊 PMO (Portefeuille, Planning, Risques & Jalons)</option>
                     <option value="CHEF_PROJET">🚀 Chef de Projet (Kanban, Gantt, WBS, Équipe)</option>
                     <option value="CHEF_PROJET_PROD">🚢 Chef de Projet Production (CPP - SCT / Changes & Déploiements)</option>
                     <option value="CONTRIBUTEUR">👤 Contributeur (Mes Tâches & Mon Temps)</option>
@@ -872,7 +870,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     {sqlSchema || `-- Schéma PostgreSQL Clarity PM
 CREATE TYPE user_role_enum AS ENUM ('DIRECTEUR_PROJETS', 'CHEF_PROJET', 'PMO', 'CONTRIBUTEUR', 'ADMINISTRATEUR');
 CREATE TABLE IF NOT EXISTS users (id VARCHAR(64) PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, role user_role_enum NOT NULL);
-CREATE TABLE IF NOT EXISTS projects (id VARCHAR(64) PRIMARY KEY, code VARCHAR(32) UNIQUE NOT NULL, name VARCHAR(255) NOT NULL, budget_bac NUMERIC(14,2));
+CREATE TABLE IF NOT EXISTS projects (id VARCHAR(64) PRIMARY KEY, code VARCHAR(32) UNIQUE NOT NULL, name VARCHAR(255) NOT NULL, start_date DATE, end_date DATE);
 CREATE TABLE IF NOT EXISTS tasks (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), wbs_code VARCHAR(32), progress INT);
 CREATE TABLE IF NOT EXISTS team_members (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), daily_rate_tjm NUMERIC(10,2));
 CREATE TABLE IF NOT EXISTS risks (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), score INT, severity VARCHAR(32));
@@ -984,9 +982,8 @@ CREATE OR REPLACE VIEW view_portfolio_summary AS SELECT p.id, p.name, AVG(t.prog
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
-                { key: 'wbsGeneration', label: 'Décomposition WBS & Création de Tâches', desc: 'Génération instantanée de sous-lots et chiffrages' },
+                { key: 'wbsGeneration', label: 'Décomposition WBS & Création de Tâches', desc: 'Génération instantanée de lots, tâches et dépendances' },
                 { key: 'copilReporting', label: 'Rapports Exécutifs Flash COPIL', desc: 'Synthèses automatiques destinées aux comités de pilotage' },
-                { key: 'earnedValueAudit', label: 'Diagnostic EVM & Dérive Délais/Coûts', desc: 'Calcul prédictif des variances SPI, CPI, EAC et VAC' },
                 { key: 'riskPrediction', label: 'Anticipation & Analyse des Risques', desc: 'Suggestions proactives de plans de mitigation' },
               ].map((f) => (
                 <div key={f.key} className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
@@ -1048,7 +1045,7 @@ CREATE OR REPLACE VIEW view_portfolio_summary AS SELECT p.id, p.name, AVG(t.prog
                 </div>
                 <p className="text-xs text-slate-700 leading-relaxed max-w-3xl">
                   Responsable hiérarchique et garant du portefeuille : 
-                  habilité à <strong>créer et modifier les projets</strong>, <strong>allouer et provisionner les ressources humaines</strong>, valider les enveloppes budgétaires et arbitrer les priorités transverses.
+                  habilité à <strong>créer et modifier les projets</strong>, <strong>allouer et provisionner les ressources humaines</strong>, arbitrer les priorités transverses.
                 </p>
               </div>
 
@@ -1063,7 +1060,7 @@ CREATE OR REPLACE VIEW view_portfolio_summary AS SELECT p.id, p.name, AVG(t.prog
                   <span>Ajout & Pilotage des Projets</span>
                 </div>
                 <p className="text-[11px] text-slate-600">
-                  Création de nouveaux projets dans Clarity PM, définition du code, cadrage et allocation budgétaire (BAC).
+                  Création de nouveaux projets dans Clarity PM, définition du code, cadrage technique et suivi des jalons.
                 </p>
               </div>
 
@@ -1073,7 +1070,7 @@ CREATE OR REPLACE VIEW view_portfolio_summary AS SELECT p.id, p.name, AVG(t.prog
                   <span>Gestion des Ressources</span>
                 </div>
                 <p className="text-[11px] text-slate-600">
-                  Attribution des équipes, fixation des taux horaires (TJM), gestion de la capacité et arbitrage de la charge.
+                  Attribution des équipes, gestion de la capacité et arbitrage de la charge opérationnelle.
                 </p>
               </div>
 
