@@ -5,7 +5,6 @@ import {
   Task,
   AppUser
 } from '../types';
-import { formatDateFR } from '../utils/pmCalculations';
 import { 
   Users, 
   UserPlus, 
@@ -144,7 +143,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
           const completedTasks = assignedTasks.filter((t) => t.status === 'DONE');
           
           const totalEstimatedHours = assignedTasks.reduce((sum, t) => sum + (Number(t.estimatedHours) || 0), 0);
-          const totalActualHours = assignedTasks.reduce((sum, t) => sum + (Number(t.actualHours) || 0), 0);
           
           // Monthly capacity = weekly * 4
           const monthlyCapacity = (member.maxWeeklyHours || 35) * 4;
