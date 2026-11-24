@@ -249,6 +249,50 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   useEffect(() => { let active = true; fetch('/api/meps', { credentials: 'same-origin' }).then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Chargement MEP impossible'); return data; }).then((data) => { if (!active) return; const meps = (data.meps || []).map((m: any) => normalizeMep(m, clarityProjects)); setDb({ mep: meps, kanban: [] }); mepRevision.current = Number(data.revision) || 1; setMepLoadError(null); setMepLoaded(true); }).catch((error) => { console.error(error); if (active) { setMepLoadError(error instanceof Error ? error.message : 'Impossible de charger les MEP depuis le serveur'); } }); return () => { active = false; }; }, [currentUser.id]);
   useEffect(() => { setDb((current) => ({ ...current, mep: current.mep.map((m) => ({ ...m, project: clarityProjects.find((p) => p.id === m.projectId)?.name || m.project })) })); }, [clarityProjects]);
 
+  // Reflect edits made in the general project workspace back into linked MEP actions.
+  useEffect(() => {
+    if (!mepLoaded || !db.mep.length) return;
+    let changed = false;
+    const synchronized = db.mep.map((mep) => {
+      const project = clarityProjects.find((item) => item.id === mep.projectId);
+      if (!project) return mep;
+      const baseDate = dayStr(mep.date) || isoToday();
+      const tasks = (mep.tasks || []).map((task) => {
+        if (task.projectTaskId) {
+          const projectTask = project.tasks.find((item) => item.id === task.projectTaskId);
+          if (projectTask) {
+            const status: MepTaskStatus = projectTask.status === 'DONE' ? 'Terminé'
+              : projectTask.status === 'IN_PROGRESS' ? 'En cours'
+              : projectTask.status === 'REVIEW' ? 'En validation' : 'À faire';
+            const start = dayStr(projectTask.startDate) || baseDate;
+            const end = dayStr(projectTask.dueDate) || start;
+            const offset = Math.round((new Date(`${start}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
+            const duration = Math.max(1, Math.round((new Date(`${end}T12:00:00`).getTime() - new Date(`${start}T12:00:00`).getTime()) / 86400000) + 1);
+            if (task.status !== status || task.offset !== offset || task.duration !== duration) {
+              changed = true;
+              return { ...task, status, offset, duration };
+            }
+          }
+        }
+        if (task.kind === 'Jalon' && task.projectMilestoneId) {
+          const milestone = project.milestones.find((item) => item.id === task.projectMilestoneId);
+          if (milestone) {
+            const status: MepTaskStatus = milestone.completed ? 'Terminé' : 'À faire';
+            const offset = Math.round((new Date(`${dayStr(milestone.targetDate)}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
+            if (task.status !== status || task.offset !== offset || task.duration !== 1) {
+              changed = true;
+              return { ...task, status, offset, duration: 1 };
+            }
+          }
+        }
+        return task;
+      });
+      return tasks === mep.tasks ? mep : { ...mep, tasks };
+    });
+    if (changed) persistDb({ ...db, mep: synchronized });
+  }, [clarityProjects, db.mep, mepLoaded]);
+
+
   const [page, setPage] = useState<ProdPilotPage>(activeProjectId ? 'mep' : 'dashboard');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
@@ -3101,7 +3145,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     {taskDraft.map((t, i) => (
                       <div
                         key={t.id}
-                        className="grid grid-cols-1 md:grid-cols-[2fr_90px_1fr_80px_70px_115px_34px] gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200"
+                        className="grid grid-cols-1 md:grid-cols-[2fr_90px_1fr_80px_70px_115px_1fr_1fr_34px] gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200"
                       >
                         <input
                           type="text"
@@ -3175,23 +3219,22 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                             <option key={projectTask.id} value={projectTask.id}>{projectTask.title}</option>
                           ))}
                         </select>
-                        {t.kind === 'Jalon' && (
-                          <select
-                            value={t.projectMilestoneId || ''}
-                            title="Lier à un jalon du projet général"
-                            onChange={(e) => {
-                              const next = [...taskDraft];
-                              next[i].projectMilestoneId = e.target.value || undefined;
-                              setTaskDraft(next);
-                            }}
-                            className="text-xs p-2 rounded-lg border border-slate-300 bg-white"
-                          >
-                            <option value="">Jalon projet : aucun</option>
-                            {(clarityProjects.find((p) => p.id === mepForm.projectId)?.milestones || []).map((milestone) => (
-                              <option key={milestone.id} value={milestone.id}>{milestone.title}</option>
-                            ))}
-                          </select>
-                        )}
+                        <select
+                          value={t.projectMilestoneId || ''}
+                          title="Lier à un jalon du projet général"
+                          disabled={t.kind !== 'Jalon'}
+                          onChange={(e) => {
+                            const next = [...taskDraft];
+                            next[i].projectMilestoneId = e.target.value || undefined;
+                            setTaskDraft(next);
+                          }}
+                          className="text-xs p-2 rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                        >
+                          <option value="">Jalon projet : aucun</option>
+                          {(clarityProjects.find((p) => p.id === mepForm.projectId)?.milestones || []).map((milestone) => (
+                            <option key={milestone.id} value={milestone.id}>{milestone.title}</option>
+                          ))}
+                        </select>
                         <select
                           value={t.status}
                           onChange={(e) => {
