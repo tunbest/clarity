@@ -526,6 +526,7 @@ export const App: React.FC = () => {
                 scopes={scopes}
                 canManageScopes={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR'}
                 onSaveScopes={handleSaveScopes}
+                onUpdateProject={handleUpdateProject}
                 onSelectProject={(id) => {
                   setActiveProjectId(id);
                   setActiveTab('DASHBOARD');
