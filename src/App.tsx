@@ -139,7 +139,7 @@ export const App: React.FC = () => {
   const handleImportCatalog = async (payload: any) => {
     if (!payload || payload.format !== 'clarity-catalog' || payload.version !== 1 || !Array.isArray(payload.scopes) || !Array.isArray(payload.projects)) throw new Error('JSON invalide : format clarity-catalog version 1 attendu.');
     const now = new Date().toISOString();
-    const mergedScopes = [...scopes];
+    const mergedScopes = scopes.map(scope => ({ ...scope, trigrams: [...scope.trigrams] }));
     for (const item of payload.scopes) {
       const code = String(item?.code || '').trim().toUpperCase();
       const name = String(item?.name || '').trim();
