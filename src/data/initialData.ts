@@ -583,8 +583,8 @@ export const INITIAL_PROJECTS: Project[] = [
   {
     id: 'proj-titanerp',
     code: 'TITAN-ERP',
-    name: 'Déploiement ERP & CRM Groupe International',
-    description: 'Harmonisation des processus financiers, logistiques et RH sur 4 filiales européennes (France, Allemagne, Espagne, Italie).',
+    name: 'Modernisation du socle de production multi-sites',
+    description: 'Modernisation des infrastructures et services de production sur quatre sites européens : standardisation, supervision, haute disponibilité et sécurisation des déploiements.',
     client: 'Industrie & Énergie SA',
     managerName: 'Alexandre Morel',
     status: 'AT_RISK',
@@ -608,7 +608,7 @@ export const INITIAL_PROJECTS: Project[] = [
       {
         id: 't-mem2',
         name: 'Marcelle Dufresne',
-        role: 'Consultante Fonctionnelle Finance',
+        role: 'Ingénieure Infrastructure & Production',
         email: 'm.dufresne@consulting.fr',
         maxWeeklyHours: 35,
         color: '#059669',
@@ -618,7 +618,7 @@ export const INITIAL_PROJECTS: Project[] = [
       {
         id: 'm-t1',
         projectId: 'proj-titanerp',
-        title: 'Core Model Finance & Comptabilité',
+        title: 'Architecture cible et socle de production',
         targetDate: '2026-02-28',
         actualDate: '2026-03-15',
         completed: true,
@@ -631,7 +631,7 @@ export const INITIAL_PROJECTS: Project[] = [
         targetDate: '2026-06-30',
         actualDate: '2026-07-20',
         completed: true,
-        description: 'Bascule réussie mais budget d’assistance dépassé.',
+        description: 'Bascule réalisée ; quelques anomalies de supervision restent à traiter.',
       },
       {
         id: 'm-t3',
@@ -639,7 +639,7 @@ export const INITIAL_PROJECTS: Project[] = [
         title: 'Déploiement Filiales Allemagne & Espagne',
         targetDate: '2026-10-30',
         completed: false,
-        description: 'Retards signalés sur la reprise des données comptables allemandes.',
+        description: 'Retards signalés sur les tests de bascule et la validation des dépendances réseau du site allemand.',
       },
     ],
     risks: [
@@ -670,7 +670,7 @@ export const INITIAL_PROJECTS: Project[] = [
       {
         id: 'tt-1',
         projectId: 'proj-titanerp',
-        title: 'Ateliers de cadrage Core Model',
+        title: 'Ateliers de cadrage technique multi-sites',
         status: 'DONE',
         priority: 'HIGH',
         assigneeId: 't-mem1',
@@ -681,12 +681,12 @@ export const INITIAL_PROJECTS: Project[] = [
         actualHours: 140,
         completionPercent: 100,
         category: 'Cadrage',
-        tags: ['Finance', 'CoreModel'],
+        tags: ['Infrastructure', 'Production', 'Architecture'],
       },
       {
         id: 'tt-2',
         projectId: 'proj-titanerp',
-        title: 'Reprise des données comptables et historiques 5 ans',
+        title: 'Migration des configurations et services de production',
         status: 'IN_PROGRESS',
         priority: 'CRITICAL',
         assigneeId: 't-mem2',
