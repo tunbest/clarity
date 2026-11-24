@@ -341,7 +341,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     onConfirm: () => void;
   } | null>(null);
 
-  // Assistant Copilot State
+  // Assistant d'import contrôlé
   const [assistantSource, setAssistantSource] = useState('');
   const [assistantFileInfo, setAssistantFileInfo] = useState('Aucun fichier chargé.');
   const [assistantPromptText, setAssistantPromptText] = useState('');
@@ -349,18 +349,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const [assistantParsed, setAssistantParsed] = useState<any[]>([]);
   const [assistantPreviewMsg, setAssistantPreviewMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [isAiParsing, setIsAiParsing] = useState(false);
-
-  // Copilot Studio Direct Line State
-  const [copilotUrl, setCopilotUrl] = useState('');
-  const [copilotConnected, setCopilotConnected] = useState(false);
-  const [copilotBusy, setCopilotBusy] = useState(false);
-  const [copilotInput, setCopilotInput] = useState('');
-  const [copilotMessages, setCopilotMessages] = useState<{ role: 'bot' | 'user' | 'system'; text: string }[]>([
-    {
-      role: 'bot',
-      text: 'Bonjour ! Je suis votre assistant de pilotage de production. Vous pouvez analyser automatiquement la source chargée à gauche ou connecter un agent Copilot Studio.',
-    },
-  ]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -957,7 +945,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     }
   };
 
-  // Assistant Copilot & Spreadsheet Import Handlers
+  // Assistant d'import contrôlé & handlers
   const handleAssistantFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -979,13 +967,13 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         setAssistantFileInfo(`${file.name} · ${(file.size / 1024).toFixed(1)} Ko chargés.`);
       }
       setAssistantPromptText('');
-      showToast('Fichier chargé. Prêt pour analyse ou prompt Copilot.');
+      showToast('Fichier chargé. Prêt pour analyse ou préparation de prompt.');
     } catch (err: any) {
       showToast(err?.message || 'Impossible de lire le fichier');
     }
   };
 
-  const buildCopilotPrompt = () => {
+  const buildAssistantPrompt = () => {
     const src = assistantSource.trim();
     if (!src) {
       showToast('Ajoutez un texte ou importez un fichier d’abord');
@@ -1019,12 +1007,12 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     setAssistantJson('');
     setAssistantParsed([]);
     setAssistantPreviewMsg(null);
-    showToast('Prompt Copilot préparé');
+    showToast('Prompt préparé');
     return prompt;
   };
 
   const handleCopyPrompt = async () => {
-    const v = assistantPromptText || buildCopilotPrompt();
+    const v = assistantPromptText || buildAssistantPrompt();
     if (!v) return;
     try {
       await navigator.clipboard.writeText(v);
@@ -1060,90 +1048,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       showToast('Erreur de communication avec le serveur');
     } finally {
       setIsAiParsing(false);
-    }
-  };
-
-  const handleConnectCopilot = async () => {
-    const endpoint = copilotUrl.trim();
-    if (!endpoint) {
-      showToast('Renseignez le Token Endpoint Copilot Studio');
-      return;
-    }
-    setCopilotBusy(true);
-    try {
-      const res = await fetch('/api/copilot/directline/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setCopilotMessages((prev) => [...prev, { role: 'system', text: data.error || 'Connexion impossible' }]);
-        return;
-      }
-      setCopilotConnected(true);
-      setCopilotMessages([
-        { role: 'system', text: `Connexion établie (expiration du jeton : ${Math.round((data.expiresIn || 3600) / 60)} min).` },
-        { role: 'bot', text: 'Bonjour ! Je peux analyser la source chargée et préparer les projets et MEP.' },
-      ]);
-      showToast('Agent Copilot connecté');
-    } catch {
-      setCopilotMessages((prev) => [...prev, { role: 'system', text: 'Erreur réseau lors de la connexion Copilot.' }]);
-    } finally {
-      setCopilotBusy(false);
-    }
-  };
-
-  const handleSendCopilotMessage = async (textToSend?: string) => {
-    const message = (textToSend ?? copilotInput).trim();
-    if (!message || !copilotConnected) return;
-    if (!textToSend) setCopilotInput('');
-    setCopilotMessages((prev) => [...prev, { role: 'user', text: message }]);
-    setCopilotBusy(true);
-    try {
-      const sendRes = await fetch('/api/copilot/directline/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: message }),
-      });
-      const sendData = await sendRes.json();
-      if (!sendRes.ok || !sendData.success) {
-        setCopilotMessages((prev) => [...prev, { role: 'system', text: sendData.error || 'Envoi impossible' }]);
-        return;
-      }
-      const seen = new Set<string>();
-      let foundText = false;
-      for (let i = 0; i < 18; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const pollRes = await fetch('/api/copilot/directline/poll');
-        const pollData = await pollRes.json();
-        for (const a of pollData.activities || []) {
-          const key = a.id || `${a.timestamp || ''}-${a.text || ''}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          if (a.text) {
-            foundText = true;
-            setCopilotMessages((prev) => [...prev, { role: 'bot', text: a.text }]);
-            const cleaned = a.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-            if ((cleaned.startsWith('{') || cleaned.startsWith('[')) && /("mep"|"meps")/i.test(cleaned)) {
-              try {
-                JSON.parse(cleaned);
-                setAssistantJson(cleaned);
-                previewAssistantJson(cleaned);
-                showToast('Réponse JSON reçue et prévisualisée');
-              } catch {
-                // ignore non-JSON
-              }
-            }
-          }
-        }
-        if (foundText) break;
-      }
-      if (!foundText) {
-        setCopilotMessages((prev) => [...prev, { role: 'system', text: 'Aucune réponse texte reçue après 18 secondes.' }]);
-      }
-    } finally {
-      setCopilotBusy(false);
     }
   };
 
@@ -1307,7 +1211,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     { id: 'planning', label: 'Planning & calendrier', icon: CalendarIcon },
     { id: 'reports', label: 'Reporting', icon: BarChart3 },
     { id: 'minutes', label: 'Comptes rendus', icon: FileText },
-    { id: 'assistant', label: 'Assistant Copilot', icon: Sparkles, badge: 'IA' },
+    { id: 'assistant', label: 'Assistant IA', icon: Sparkles, badge: 'IA' },
     { id: 'settings', label: 'Paramètres & sauvegarde', icon: Settings },
   ];
 
@@ -2526,27 +2430,19 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       )}
 
       {/* =====================================================================
-          7. ASSISTANT COPILOT & IMPORT EXCEL/TEXTE
+          7. ASSISTANT IA & IMPORT EXCEL/TEXTE
          ===================================================================== */}
       {page === 'assistant' && (
         <div className="space-y-6">
           <CommunicationAssistant projects={clarityProjects} meps={db.mep} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-black text-slate-900">Assistant Copilot & Import Contrôlé</h3>
+              <h3 className="text-base font-black text-slate-900">Assistant IA & Import Contrôlé</h3>
               <p className="text-xs text-slate-500">
                 Préparez des projets et des MEP depuis un texte ou un classeur Excel, puis validez les données avant import.
               </p>
             </div>
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                copilotConnected
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-amber-50 text-amber-800 border-amber-200'
-              }`}
-            >
-              {copilotConnected ? 'Agent Copilot connecté' : 'IA Clarity intégrée prête'}
-            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">IA Clarity prête</span>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2597,10 +2493,10 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   Effacer
                 </button>
                 <button
-                  onClick={buildCopilotPrompt}
+                  onClick={buildAssistantPrompt}
                   className="px-3.5 py-2 bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold cursor-pointer"
                 >
-                  Préparer le prompt Copilot
+                  Préparer un prompt externe
                 </button>
                 <button
                   onClick={handleAnalyzeWithClarityAI}
@@ -2617,104 +2513,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               </div>
             </div>
 
-            {/* Step 2: Microsoft Copilot Studio */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900">2. Microsoft Copilot Studio</h4>
-                  <p className="text-xs text-slate-500">Connexion optionnelle à votre agent Direct Line.</p>
-                </div>
-                <Sparkles className="w-4 h-4 text-indigo-600" />
-              </div>
-
-              {!copilotConnected ? (
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Renseignez le <strong>Token Endpoint</strong> de votre agent Copilot Studio (canal Application mobile). Les réponses JSON seront automatiquement envoyées vers la zone de validation ci-dessous.
-                  </p>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700">Token Endpoint Copilot Studio</label>
-                    <input
-                      type="url"
-                      value={copilotUrl}
-                      onChange={(e) => setCopilotUrl(e.target.value)}
-                      placeholder="https://…environment.api.powerplatform.com/powervirtualagents/botsbyschema/…/directline/token?api-version=2022-03-01-preview"
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                  <button
-                    onClick={handleConnectCopilot}
-                    disabled={copilotBusy}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
-                  >
-                    {copilotBusy ? 'Connexion…' : 'Connecter mon agent'}
-                  </button>
-                  <p className="text-[11px] text-slate-500">
-                    Astuce : vous pouvez aussi cliquer sur <strong>Analyser automatiquement</strong> à gauche pour extraire les fiches MEP directement via le moteur IA de Clarity.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-700">Agent connecté</span>
-                    <button
-                      onClick={async () => {
-                        await fetch('/api/copilot/directline/disconnect', { method: 'POST' });
-                        setCopilotConnected(false);
-                      }}
-                      className="text-xs font-bold text-rose-600 hover:underline cursor-pointer"
-                    >
-                      Déconnecter
-                    </button>
-                  </div>
-                  <div className="h-64 overflow-y-auto p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                    {copilotMessages.map((m, idx) => (
-                      <div
-                        key={idx}
-                        className={`p-2.5 rounded-xl text-xs whitespace-pre-wrap max-w-[92%] ${
-                          m.role === 'user'
-                            ? 'ml-auto bg-indigo-600 text-white'
-                            : m.role === 'system'
-                            ? 'mx-auto bg-amber-50 text-amber-800 border border-amber-200 text-[11px]'
-                            : 'bg-white border border-slate-200 text-slate-800'
-                        }`}
-                      >
-                        {m.text}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="space-y-2">
-                    <textarea
-                      rows={2}
-                      value={copilotInput}
-                      onChange={(e) => setCopilotInput(e.target.value)}
-                      placeholder="Demandez à Copilot d’analyser la source, préparer les MEP, relever les risques…"
-                      className="w-full p-2.5 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        onClick={() => {
-                          const p = buildCopilotPrompt();
-                          if (p) handleSendCopilotMessage(p);
-                        }}
-                        disabled={copilotBusy}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold cursor-pointer"
-                      >
-                        Analyser la source chargée
-                      </button>
-                      <button
-                        onClick={() => handleSendCopilotMessage()}
-                        disabled={copilotBusy}
-                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Envoyer à Copilot</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Step 3: Validation & Import */}

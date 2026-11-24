@@ -1,72 +1,41 @@
-# Clarity AI – Copilot Studio et client Outlook
+# Clarity PM – Teams Copilot et communication production
 
-## Fonctionnalités
+## Architecture sans service de transcription
 
-Dans **Production / MEP → Assistant Copilot**, Clarity permet de générer :
-- un mail de début de MEP ;
-- un mail de fin de MEP ;
-- un compte rendu COPROJ à partir des notes ou de la transcription saisies.
+Le module **Production / MEP → Assistant communication** propose :
+- génération des mails de début et de fin de MEP ;
+- préparation d'un compte rendu COPROJ depuis les notes ou la transcription fournies par Teams / Microsoft 365 Copilot ;
+- import de fichiers texte Teams `.vtt` et `.txt`, ou collage direct du contenu Copilot ;
+- édition du compte rendu, copie et ouverture d'un nouveau message Outlook via `mailto:`.
 
-Le brouillon reste modifiable dans Clarity. Pour les deux mails MEP, le bouton **Ouvrir dans Outlook** prépare un nouveau message dans le client de messagerie par défaut du poste via le protocole standard `mailto:`. Pour utiliser Outlook, configurez Outlook comme application par défaut pour les liens e-mail dans Windows / votre navigateur.
+**Teams / Copilot réalise le travail de réunion. Clarity ne capture, n'enregistre et ne transcrit aucun audio.** Aucun conteneur Whisper, modèle local, GPU ou service de transcription supplémentaire n'est déployé sur le VPS.
 
-## Architecture et limites
+## Utilisation pendant et après une réunion
 
-- Clarity dialogue avec l'agent Copilot Studio via le SDK Microsoft Agents/Copilot Studio.
-- L'authentification Microsoft (MSAL) sert uniquement à autoriser l'accès à l'agent Copilot Studio.
-- **Aucune intégration Outlook API / Microsoft Graph n'est utilisée.**
-- Clarity ne lit pas la boîte Outlook, ne crée pas de brouillon dans le dossier Brouillons via le cloud et n'envoie aucun message.
-- Le client Outlook local reçoit un nouveau message prérempli (destinataires, objet et corps) via `mailto:`. L'utilisateur vérifie et envoie manuellement.
-- Si Outlook n'est pas configuré comme gestionnaire des liens `mailto:`, le navigateur peut ouvrir une autre application ou demander de choisir un client.
-- Les notes et les données de projet/MEP sélectionnées sont transmises à l'agent Copilot Studio. Vérifiez les règles de confidentialité de votre organisation avant d'utiliser des informations internes ou sensibles.
+1. Démarrer la réunion dans Microsoft Teams.
+2. Utiliser Copilot dans la réunion pour demander les points abordés, les décisions, les actions, les responsables et les échéances. La disponibilité dépend de la licence Copilot et des politiques Microsoft 365 de l'organisation.
+3. Si Teams propose une transcription ou un récapitulatif exportable, récupérer le fichier `.vtt` / `.txt`. Sinon, copier les notes ou la réponse Copilot.
+4. Dans Clarity, ouvrir **Production / MEP → Assistant communication**, choisir **Compte rendu COPROJ**, puis le projet concerné.
+5. Importer le fichier texte ou coller les notes dans la zone de transcription.
+6. Cliquer **Générer le CR COPROJ**, relire les décisions, actions, propriétaires et dates, puis corriger les éléments incertains.
+7. Copier le compte rendu ou ouvrir un nouveau message Outlook.
 
-## Configuration Copilot Studio
+Le traitement de génération du compte rendu utilise le fournisseur IA déjà configuré côté serveur Clarity. Le contenu textuel et le contexte projet sont envoyés à ce fournisseur ; aucun flux audio n'est envoyé.
 
-1. Ouvrir l'agent Clarity dans Copilot Studio et vérifier qu'il est publié et accessible à l'utilisateur.
-2. Dans **Settings → Advanced → Metadata**, récupérer l'**Environment ID** et le **Schema name**.
-3. Vérifier le nom de schéma de l'agent ; la valeur préremplie dans Clarity est `cr299_clarity_tB6p_X`.
+## Limite importante : pas de transcription Teams activée
 
-## Authentification Copilot
+Copilot peut, selon la licence, le type de réunion et les paramètres de l'organisation, répondre à des questions et produire des notes pendant la réunion sans activer la transcription classique. Cela ne signifie pas qu'un verbatim complet sera disponible après la réunion. Si aucune transcription ni notes Copilot exportables ne sont disponibles, Clarity ne peut pas reconstituer les paroles qui n'ont pas été capturées.
 
-L'intégration Copilot Studio nécessite une application Microsoft Entra de type SPA et une autorisation déléguée à l'agent :
+Clarity ne lit pas automatiquement la session Copilot et ne récupère pas le contenu Teams en arrière-plan. Cette version ne met en œuvre ni Microsoft Graph, ni Copilot Studio, ni accès Entra ID spécifique à la réunion.
 
-1. Créer une inscription d'application dans le tenant qui héberge l'environnement Copilot Studio.
-2. Ajouter une plateforme **Single-page application (SPA)** et l'URL HTTPS exacte de Clarity comme URI de redirection.
-3. Ajouter l'autorisation déléguée **Power Platform API → CopilotStudio.Copilots.Invoke**.
-4. Accorder le consentement requis par la politique de l'organisation.
-5. Ne pas créer de client secret et ne jamais stocker de secret dans le navigateur.
+## Outlook
 
-Aucune permission Microsoft Graph, notamment `Mail.ReadWrite`, n'est nécessaire pour Outlook.
+L'ouverture via `mailto:` préremplit une fenêtre de composition du client de messagerie configuré. Clarity ne lit pas la boîte Outlook, ne crée pas directement un brouillon dans la boîte aux lettres et n'envoie aucun message. L'utilisateur vérifie et envoie manuellement.
 
-## Configuration dans Clarity
+## Sécurité et exploitation
 
-Dans **Production / MEP → Assistant Copilot → Clarity AI · Communication**, renseigner :
-- **Tenant ID** : Directory (tenant) ID ;
-- **Application (Client) ID** : Application (client) ID ;
-- **Copilot Studio Environment ID** : valeur de l'environnement ;
-- **Agent Schema name** : `cr299_clarity_tB6p_X` (à confirmer dans le tenant).
-
-Enregistrer la configuration puis cliquer sur **Se connecter à Copilot**.
-
-## Utilisation
-
-1. Choisir **Mail de début de MEP**, **Mail de fin de MEP** ou **Compte rendu COPROJ (notes)**.
-2. Sélectionner la MEP ou le projet concerné.
-3. Pour le COPROJ, coller les notes ou la transcription.
-4. Cliquer sur **Générer avec Copilot**.
-5. Relire et corriger le sujet et le contenu dans Clarity.
-6. Pour un mail MEP, renseigner les destinataires si nécessaire et cliquer sur **Ouvrir dans Outlook**.
-7. Vérifier le message dans le client Outlook avant de l'envoyer manuellement.
-
-Le protocole `mailto:` dépend du navigateur et du poste. Si le corps du message est trop long pour le gestionnaire de liens, utiliser **Copier** dans Clarity puis coller le contenu dans un nouveau message Outlook.
-
-## Dépannage
-
-- **AADSTS / consentement refusé** : vérifier le tenant, l'URI SPA et l'autorisation déléguée Copilot Studio.
-- **Agent introuvable / 404** : vérifier l'Environment ID, le Schema name, la publication de l'agent et les droits d'accès de l'utilisateur.
-- **Outlook ne s'ouvre pas** : vérifier qu'Outlook est installé et défini comme application par défaut pour le protocole `MAILTO` dans Windows et le navigateur.
-- **Le sujet ou le corps n'est pas prérempli** : utiliser le bouton **Copier**, puis coller dans un nouveau message Outlook ; certains clients limitent la longueur des URI `mailto:`.
-- **Aucune réponse exploitable** : vérifier les instructions et les sorties de l'agent Copilot Studio. Les informations manquantes doivent rester à confirmer et le contenu doit être relu.
-
-## Références Microsoft
-
-- [Intégrer une application web ou native à Copilot Studio avec Microsoft 365 Agents SDK](https://learn.microsoft.com/microsoft-copilot-studio/publication-integrate-web-or-native-app-m365-agents-sdk)
+- Aucun enregistrement audio ou fichier audio n'est conservé par Clarity.
+- Aucun service Whisper ou volume de cache Whisper n'est créé par le workflow de déploiement.
+- Les routes de génération restent soumises à la session Clarity.
+- Le compte rendu est un brouillon à valider ; ne jamais traiter une décision, une personne ou une échéance absente des notes comme un fait confirmé.
+- Informer les participants et respecter les règles internes de confidentialité et de protection des données.
