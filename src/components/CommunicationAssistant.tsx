@@ -1,10 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Mail, FileText, Sparkles, Loader2, Mic, Square, MonitorUp, AudioLines, CheckCircle2, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Copy, Mail, FileText, Sparkles, Loader2, Upload, CheckCircle2, AlertTriangle, ClipboardPaste } from 'lucide-react';
 import { Project } from '../types';
 
 type CommunicationMode = 'mep-start' | 'mep-end' | 'coproj';
 interface DraftContent { subject: string; body: string; }
 const asText = (value: unknown) => value == null || value === '' ? 'Non renseigné' : String(value);
+
+const cleanTeamsTranscript = (value: string) => value
+  .replace(/^\uFEFF/, '')
+  .replace(/^WEBVTT[^\n]*\n?/i, '')
+  .replace(/^\d+\s*$/gm, '')
+  .replace(/\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}[^\n]*\n?/g, '')
+  .replace(/<v\s+([^>]+)>/gi, '$1 : ')
+  .replace(/<\/?v>/gi, '')
+  .replace(/<[^>]+>/g, '')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
 
 export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[] }> = ({ projects, meps }) => {
   const [mode, setMode] = useState<CommunicationMode>('mep-start');
@@ -14,16 +25,8 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [transcript, setTranscript] = useState('');
   const [draft, setDraft] = useState<DraftContent>({ subject: '', body: '' });
   const [busy, setBusy] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState<'info' | 'success' | 'warning'>('info');
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const displayStreamRef = useRef<MediaStream | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const startedAtRef = useRef<number>(0);
 
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
   const selectedProject = useMemo(() => projects.find((p) => p.id === (mode === 'coproj' ? selectedProjectId : selectedMep?.projectId)), [projects, mode, selectedProjectId, selectedMep]);
@@ -31,19 +34,6 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   useEffect(() => {
     if (meps.length && !meps.some((m) => m.id === selectedMepId)) setSelectedMepId(meps[0].id);
   }, [meps, selectedMepId]);
-
-  useEffect(() => {
-    if (!recording) return;
-    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
-    return () => window.clearInterval(timer);
-  }, [recording]);
-
-  useEffect(() => () => {
-    recorderRef.current?.state !== 'inactive' && recorderRef.current?.stop();
-    displayStreamRef.current?.getTracks().forEach((track) => track.stop());
-    micStreamRef.current?.getTracks().forEach((track) => track.stop());
-    void audioContextRef.current?.close();
-  }, []);
 
   const buildContext = () => {
     if (mode === 'coproj') {
@@ -70,7 +60,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   };
 
   const generateDraft = async (selectedMode: CommunicationMode, meetingTranscript = '') => {
-    if (selectedMode === 'coproj' && meetingTranscript.trim().length < 20) throw new Error('La transcription est trop courte pour préparer un compte rendu.');
+    if (selectedMode === 'coproj' && meetingTranscript.trim().length < 20) throw new Error('Collez ou importez d’abord la transcription Teams/Copilot.');
     if (selectedMode !== 'coproj' && !selectedMep) throw new Error('Sélectionnez une MEP.');
     const response = await fetch('/api/communications/draft', {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
@@ -81,103 +71,11 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     setDraft({ subject: String(result.subject || ''), body: String(result.body || '') });
   };
 
-  const uploadRecording = async (blob: Blob) => {
-    if (!blob.size) { setMessage('Aucun son n’a été enregistré. Vérifiez le partage audio Teams.'); setNotice('warning'); return; }
-    setBusy(true); setMessage('Envoi sécurisé au serveur Whisper et transcription en français…'); setNotice('info');
+  const runGeneration = async (selectedMode: CommunicationMode, source = '') => {
+    setBusy(true); setMessage('Préparation du document par Clarity…'); setNotice('info');
     try {
-      const mime = blob.type || 'audio/webm';
-      const response = await fetch('/api/meetings/transcribe', {
-        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': mime }, body: blob,
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || 'La transcription a échoué.');
-      const text = String(result.transcript || '').trim();
-      if (!text) throw new Error('Whisper n’a détecté aucune parole exploitable.');
-      setTranscript(text);
-      setMessage('Transcription terminée. Préparation du compte rendu et du brouillon d’e-mail…');
-      await generateDraft('coproj', text);
-      setMessage('Transcription et brouillon COPROJ générés. Relisez et corrigez le contenu avant de l’utiliser.');
-      setNotice('success');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Erreur pendant la transcription.');
-      setNotice('warning');
-    } finally { setBusy(false); }
-  };
-
-  const startRecording = async () => {
-    if (!navigator.mediaDevices?.getDisplayMedia || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-      setMessage('La capture audio nécessite un navigateur récent (Edge ou Chrome) et une connexion HTTPS.');
-      setNotice('warning'); return;
-    }
-    try {
-      setMessage('Sélectionnez l’écran Teams et cochez « Partager l’audio du système ».');
-      setNotice('info');
-      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      displayStreamRef.current = display;
-      const systemTracks = display.getAudioTracks();
-      if (!systemTracks.length) {
-        display.getTracks().forEach((track) => track.stop());
-        displayStreamRef.current = null;
-        throw new Error('Aucun audio système reçu. Relancez le partage et cochez « Partager l’audio du système ».');
-      }
-
-      let recordingStream = new MediaStream(systemTracks);
-      try {
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-        micStreamRef.current = mic;
-        const context = new AudioContext();
-        audioContextRef.current = context;
-        await context.resume();
-        const destination = context.createMediaStreamDestination();
-        context.createMediaStreamSource(new MediaStream(systemTracks)).connect(destination);
-        context.createMediaStreamSource(mic).connect(destination);
-        recordingStream = destination.stream;
-      } catch {
-        setMessage('Microphone non autorisé : seuls les sons reçus de Teams seront capturés.');
-      }
-
-      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type));
-      const recorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
-      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
-      recorder.onerror = () => { setMessage('Erreur de capture audio. Arrêtez puis relancez la capture.'); setNotice('warning'); };
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        displayStreamRef.current?.getTracks().forEach((track) => track.stop());
-        micStreamRef.current?.getTracks().forEach((track) => track.stop());
-        displayStreamRef.current = null; micStreamRef.current = null;
-        void audioContextRef.current?.close(); audioContextRef.current = null;
-        void uploadRecording(blob);
-      };
-      recorderRef.current = recorder;
-      recorder.start(1000);
-      startedAtRef.current = Date.now();
-      setElapsed(0); setRecording(true);
-      setMessage('Clarity écoute la réunion. Les données audio restent sur le VPS pour la transcription Whisper.');
-      setNotice('success');
-      display.getVideoTracks()[0]?.addEventListener('ended', () => {
-        if (recorder.state !== 'inactive') recorder.stop();
-        setRecording(false);
-      });
-    } catch (error) {
-      displayStreamRef.current?.getTracks().forEach((track) => track.stop());
-      displayStreamRef.current = null;
-      setMessage(error instanceof Error ? error.message : 'Impossible de démarrer la capture audio.');
-      setNotice('warning');
-    }
-  };
-
-  const stopRecording = () => {
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state !== 'inactive') recorder.stop();
-    setRecording(false);
-  };
-
-  const generateMepEmail = async () => {
-    setBusy(true); setMessage('Préparation du mail par le serveur Clarity…'); setNotice('info');
-    try {
-      await generateDraft(mode);
-      setMessage('Brouillon généré. Relisez et corrigez le contenu avant ouverture dans Outlook.');
+      await generateDraft(selectedMode, source);
+      setMessage(selectedMode === 'coproj' ? 'Compte rendu COPROJ généré. Vérifiez les décisions, responsables et échéances.' : 'Brouillon généré. Relisez-le avant utilisation.');
       setNotice('success');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Génération impossible.');
@@ -185,36 +83,55 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     } finally { setBusy(false); }
   };
 
+  const importTranscript = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!/\.(txt|vtt)$/i.test(file.name)) {
+      setMessage('Format non pris en charge. Importez un fichier .txt ou .vtt exporté depuis Teams.');
+      setNotice('warning'); event.target.value = ''; return;
+    }
+    try {
+      const text = cleanTeamsTranscript(await file.text());
+      setTranscript(text);
+      setMessage(`Transcription importée : ${file.name}`);
+      setNotice('success');
+    } catch {
+      setMessage('Impossible de lire ce fichier. Copiez la transcription Teams dans la zone de texte.');
+      setNotice('warning');
+    }
+    event.target.value = '';
+  };
+
   const openOutlook = () => {
-    if (!draft.subject.trim() || !draft.body.trim()) { setMessage('Le sujet et le contenu du mail sont obligatoires.'); setNotice('warning'); return; }
+    if (!draft.subject.trim() || !draft.body.trim()) { setMessage('Le sujet et le contenu sont obligatoires.'); setNotice('warning'); return; }
     const recipients = recipientText.split(/[;,\n]/).map((email) => email.trim()).filter(Boolean).map(encodeURIComponent).join(',');
     const params = new URLSearchParams({ subject: draft.subject, body: draft.body });
     window.location.href = `mailto:${recipients}?${params.toString()}`;
-    setMessage('Outlook a été sollicité. Vérifiez le message dans les Brouillons ou la fenêtre de composition avant tout envoi.');
+    setMessage('Ouverture demandée à Outlook. Vérifiez le message dans la fenêtre de composition avant tout envoi.');
     setNotice('info');
   };
 
   const copyDraft = async () => {
     await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
-    setMessage('Sujet et compte rendu copiés.'); setNotice('success');
+    setMessage('Sujet et contenu copiés.'); setNotice('success');
   };
-  const copyTranscript = async () => {
-    await navigator.clipboard.writeText(transcript);
-    setMessage('Transcription copiée.'); setNotice('success');
-  };
-  const formatTime = (seconds: number) => `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 
   return (
     <section className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
       <div>
         <div className="flex items-center gap-2 text-indigo-700"><Sparkles className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Clarity · Communication production</span></div>
-        <h3 className="text-lg font-black text-slate-900 mt-1">Mails MEP & transcription des réunions</h3>
-        <p className="text-xs text-slate-500 mt-1">Transcription locale au VPS avec Whisper. Aucun Copilot Studio, Microsoft Graph ou accès à votre boîte Outlook.</p>
+        <h3 className="text-lg font-black text-slate-900 mt-1">Mails MEP & compte rendu Teams</h3>
+        <p className="text-xs text-slate-500 mt-1">La transcription est réalisée par Microsoft Teams / Copilot. Clarity ne capture aucun audio et n’ajoute aucun service sur le VPS.</p>
       </div>
 
-      <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-950 space-y-1">
-        <b>Avant de démarrer une réunion Teams Desktop</b>
-        <p>Utilisez Clarity dans Edge ou Chrome (HTTPS). Dans le sélecteur de partage, choisissez l’écran qui affiche Teams et activez « Partager l’audio du système ». Autorisez aussi le microphone si vous souhaitez inclure votre propre voix. Informez les participants et respectez les règles internes d’enregistrement.</p>
+      <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-950 space-y-1">
+        <b>Workflow Teams Copilot</b>
+        <ol className="list-decimal pl-4 space-y-1">
+          <li>Pendant la réunion, ouvrez Copilot dans Teams et demandez le récapitulatif, les décisions et les actions.</li>
+          <li>Copiez la réponse ou exportez la transcription Teams au format .vtt / .txt si elle est disponible.</li>
+          <li>Collez le contenu ci-dessous ou importez le fichier, puis générez le CR dans Clarity.</li>
+        </ol>
+        <p className="font-semibold">Important : Copilot peut répondre pendant une réunion sans transcription activée, selon la licence et la politique Teams. Sans transcription/enregistrement, il ne garantit pas un verbatim complet après la réunion. Clarity ne se connecte pas automatiquement à la session Copilot.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -222,7 +139,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
           <select value={mode} onChange={(e) => { setMode(e.target.value as CommunicationMode); setDraft({ subject: '', body: '' }); }} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">
             <option value="mep-start">Mail de début de MEP</option>
             <option value="mep-end">Mail de fin de MEP</option>
-            <option value="coproj">Transcription + CR COPROJ</option>
+            <option value="coproj">Compte rendu COPROJ (Teams/Copilot)</option>
           </select>
         </label>
         {mode === 'coproj' ? (
@@ -242,14 +159,18 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
 
       {mode === 'coproj' ? (
         <div className="border border-indigo-200 rounded-xl p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><Mic className="w-4 h-4 text-indigo-600" /> Enregistrement Teams Desktop</div>
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><ClipboardPaste className="w-4 h-4 text-indigo-600" /> Transcription Teams / Copilot</div>
           <div className="flex flex-wrap items-center gap-3">
-            <button onClick={startRecording} disabled={recording || busy} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><MonitorUp className="w-4 h-4" /> Démarrer l’écoute</button>
-            <button onClick={stopRecording} disabled={!recording} className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2"><Square className="w-3.5 h-3.5" /> Arrêter et transcrire</button>
-            {recording && <span className="inline-flex items-center gap-2 text-sm font-bold text-rose-700"><span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" /> {formatTime(elapsed)}</span>}
+            <label className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700 cursor-pointer flex items-center gap-2"><Upload className="w-4 h-4" /> Importer .TXT / .VTT
+              <input type="file" accept=".txt,.vtt,text/plain,text/vtt" onChange={importTranscript} className="sr-only" />
+            </label>
+            <span className="text-[11px] text-slate-500">Ou collez directement le texte copié depuis Copilot.</span>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-slate-500"><AudioLines className="w-4 h-4" /> Capture en cours dans le navigateur ; transcription effectuée sur le serveur après l’arrêt.</div>
-          {busy && <div className="flex items-center gap-2 text-xs text-indigo-700"><Loader2 className="w-4 h-4 animate-spin" /> {message}</div>}
+          <textarea rows={11} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez ici la transcription ou les notes Copilot : sujets abordés, décisions, actions, responsables, échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => runGeneration('coproj', transcript)} disabled={busy || transcript.trim().length < 20} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Sparkles className="w-4 h-4" /> {busy ? 'Génération…' : 'Générer le CR COPROJ'}</button>
+            <span className="text-[11px] text-slate-500 self-center">{transcript.trim().length.toLocaleString('fr-FR')} caractères</span>
+          </div>
         </div>
       ) : (
         <>
@@ -259,15 +180,9 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">Change</div><b>{asText(selectedMep.changeNumbers)}</b></div>
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">RITM</div><b>{asText(selectedMep.ritmNumbers)}</b></div>
           </div>}
-          <button onClick={generateMepEmail} disabled={busy} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Sparkles className="w-4 h-4" /> {busy ? 'Traitement…' : 'Générer le mail MEP'}</button>
+          <button onClick={() => runGeneration(mode)} disabled={busy} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Sparkles className="w-4 h-4" /> {busy ? 'Traitement…' : 'Générer le mail MEP'}</button>
         </>
       )}
-
-      {mode === 'coproj' && transcript && <div className="space-y-2">
-        <div className="flex items-center justify-between"><label className="text-xs font-bold text-slate-700">Transcription complète (modifiable)</label><button onClick={copyTranscript} className="text-xs font-bold text-indigo-700 flex items-center gap-1"><Copy className="w-3.5 h-3.5" /> Copier</button></div>
-        <textarea rows={9} value={transcript} onChange={(e) => setTranscript(e.target.value)} className="w-full border border-slate-300 rounded-xl p-3 text-sm font-normal leading-relaxed" />
-        <button onClick={async () => { setBusy(true); try { await generateDraft('coproj', transcript); setMessage('Compte rendu régénéré à partir de la transcription modifiée.'); setNotice('success'); } catch (e) { setMessage(e instanceof Error ? e.message : 'Génération impossible.'); setNotice('warning'); } finally { setBusy(false); } }} disabled={busy} className="px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-bold">Régénérer le CR depuis la transcription</button>
-      </div>}
 
       {(draft.subject || draft.body) && <div className="border border-indigo-100 bg-indigo-50/30 rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><FileText className="w-4 h-4" /> Brouillon à relire et modifier</div>
@@ -282,7 +197,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         </label>
         <div className="flex flex-wrap gap-2">
           <button onClick={copyDraft} className="px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Copier</button>
-          <button onClick={openOutlook} disabled={busy} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Ouvrir le brouillon dans Outlook</button>
+          <button onClick={openOutlook} disabled={busy} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Ouvrir dans Outlook</button>
         </div>
       </div>}
 
