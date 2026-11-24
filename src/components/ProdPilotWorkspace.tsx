@@ -2796,7 +2796,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Trigrammes concernés (un ou plusieurs)</label>
                   <select multiple value={mepForm.trigrams || []} onChange={(e) => setMepForm({ ...mepForm, trigrams: Array.from(e.target.selectedOptions).map(o => o.value) })} className="w-full min-h-24 text-xs p-2.5 rounded-xl border border-slate-300 bg-white">
-                    {(scopes.find(s => s.id === clarityProjects.find(p => p.id === mepForm.projectId)?.scopeId)?.trigrams || Array.from(new Set(clarityProjects.find(p => p.id === mepForm.projectId)?.trigrams || []))).map(t => <option key={t} value={t}>{t}</option>)}
+                    {((clarityProjects.find(p => p.id === mepForm.projectId)?.trigrams?.length ? clarityProjects.find(p => p.id === mepForm.projectId)?.trigrams : scopes.find(s => s.id === clarityProjects.find(p => p.id === mepForm.projectId)?.scopeId)?.trigrams) || []).map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                   <p className="text-[10px] text-slate-500 mt-1">Les trigrammes proposés proviennent du périmètre du projet. Ctrl/Cmd permet une sélection multiple.</p>
                 </div>
