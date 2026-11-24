@@ -250,7 +250,8 @@ export const App: React.FC = () => {
   const handleDeleteMilestone = (msId: string) => {
     if (!activeProject) return;
     const updatedMilestones = activeProject.milestones.filter((m) => m.id !== msId);
-    handleUpdateProject({ ...activeProject, milestones: updatedMilestones });
+    const updatedTasks = activeProject.tasks.map((task) => task.milestoneId === msId ? { ...task, milestoneId: undefined } : task);
+    handleUpdateProject({ ...activeProject, milestones: updatedMilestones, tasks: updatedTasks });
   };
 
   // Data Export & Import Handlers
