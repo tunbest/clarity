@@ -26,9 +26,6 @@ const readSettings = (): CopilotSettings => {
     return { ...DEFAULT_SETTINGS, ...saved };
   } catch { return DEFAULT_SETTINGS; }
 };
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char] || char));
 const asText = (value: unknown) => value == null || value === '' ? 'Non renseigné' : String(value);
 
 export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[] }> = ({ projects, meps }) => {
@@ -42,7 +39,6 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [connected, setConnected] = useState(false);
-  const [savedDraftId, setSavedDraftId] = useState('');
   const [msal, setMsal] = useState<PublicClientApplication | null>(null);
 
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
@@ -161,7 +157,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     if (!settings.environmentId.trim() || !settings.schemaName.trim()) {
       setMessage('Complétez l’Environment ID et le Schema name Copilot Studio.'); return;
     }
-    setBusy(true); setMessage('Génération avec Copilot Studio…'); setSavedDraftId('');
+    setBusy(true); setMessage('Génération avec Copilot Studio…'); 
     try {
       const copilotSettings = new ConnectionSettings({
         environmentId: settings.environmentId.trim(),
@@ -209,29 +205,23 @@ ${JSON.stringify(buildContext(), null, 2)}`;
     } finally { setBusy(false); }
   };
 
-  const createOutlookDraft = async () => {
-    if (!draft.subject.trim() || !draft.body.trim()) { setMessage('Le sujet et le contenu du mail sont obligatoires.'); return; }
-    setBusy(true); setMessage('Création du brouillon Outlook…');
-    try {
-      const token = await acquireMicrosoftToken(['https://graph.microsoft.com/Mail.ReadWrite']);
-      const toRecipients = recipientText.split(/[;,\n]/).map((email) => email.trim()).filter(Boolean).map((address) => ({ emailAddress: { address } }));
-      const html = draft.body.split(/\n{2,}/).map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`).join('');
-      const response = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: draft.subject,
-          body: { contentType: 'HTML', content: html },
-          toRecipients,
-        }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error?.message || `Microsoft Graph a refusé la création du brouillon (${response.status}).`);
-      setSavedDraftId(result.id || '');
-      setMessage('Brouillon créé dans Outlook > Brouillons. Aucun envoi automatique n’a été effectué.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Création du brouillon Outlook impossible.');
-    } finally { setBusy(false); }
+  const openOutlookClient = () => {
+    if (!draft.subject.trim() || !draft.body.trim()) {
+      setMessage('Le sujet et le contenu du mail sont obligatoires.');
+      return;
+    }
+    const recipients = recipientText
+      .split(/[;,\\n]/)
+      .map((email) => email.trim())
+      .filter(Boolean)
+      .join(';');
+    const params = new URLSearchParams({
+      subject: draft.subject,
+      body: draft.body,
+    });
+    const mailto = `mailto:${encodeURIComponent(recipients)}?${params.toString()}`;
+    setMessage('Ouverture du client de messagerie… Vérifiez le brouillon dans Outlook avant tout envoi.');
+    window.location.href = mailto;
   };
 
   const copyDraft = async () => {
@@ -245,13 +235,13 @@ ${JSON.stringify(buildContext(), null, 2)}`;
         <div>
           <div className="flex items-center gap-2 text-indigo-700"><Sparkles className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Clarity AI · Communication</span></div>
           <h3 className="text-lg font-black text-slate-900 mt-1">Mails MEP & comptes rendus COPROJ</h3>
-          <p className="text-xs text-slate-500 mt-1">Génération avec votre agent Copilot Studio, puis création d’un brouillon Outlook après relecture.</p>
+          <p className="text-xs text-slate-500 mt-1">Génération avec votre agent Copilot Studio, puis ouverture du client Outlook après relecture.</p>
         </div>
-        <span className={`px-3 py-1 rounded-full border text-[11px] font-bold ${connected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>{connected ? 'Copilot connecté' : 'Connexion Microsoft requise'}</span>
+        <span className={`px-3 py-1 rounded-full border text-[11px] font-bold ${connected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>{connected ? 'Copilot connecté' : 'Connexion Copilot requise'}</span>
       </div>
 
       <div className="rounded-xl bg-sky-50 border border-sky-100 p-3 text-xs text-sky-900">
-        L’authentification Microsoft est indépendante de votre compte Clarity. Les jetons sont conservés dans le stockage de session MSAL ; aucun secret client n’est enregistré. La création Outlook utilise l’autorisation déléguée <b>Mail.ReadWrite</b> et ne déclenche jamais l’envoi du mail.
+        La connexion Microsoft sert uniquement à dialoguer avec votre agent Copilot Studio. Outlook est ouvert localement via le protocole mailto du poste : aucune API Outlook, aucun accès à la boîte mail et aucun envoi automatique.
       </div>
 
       <div className="border border-slate-200 rounded-xl p-4 space-y-3">
@@ -273,12 +263,12 @@ ${JSON.stringify(buildContext(), null, 2)}`;
           <button onClick={saveSettings} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-2"><Save className="w-3.5 h-3.5" /> Enregistrer la configuration</button>
           <button onClick={connectCopilot} disabled={busy} className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Se connecter à Copilot</button>
         </div>
-        <p className="text-[11px] text-slate-500">Dans Entra ID, ajoutez les autorisations déléguées Power Platform API → CopilotStudio.Copilots.Invoke et Microsoft Graph → Mail.ReadWrite. Configurez l’URL de redirection SPA sur l’URL de Clarity et accordez le consentement demandé par votre organisation.</p>
+        <p className="text-[11px] text-slate-500">Dans Entra ID, ajoutez uniquement l’autorisation déléguée Power Platform API → CopilotStudio.Copilots.Invoke. Configurez l’URL de redirection SPA sur l’URL de Clarity et accordez le consentement demandé par votre organisation. Aucune permission Microsoft Graph n’est requise.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <label className="text-xs font-bold text-slate-700 space-y-1">Document à générer
-          <select value={mode} onChange={(e) => { setMode(e.target.value as CommunicationMode); setDraft({ subject: '', body: '' }); setSavedDraftId(''); }} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">
+          <select value={mode} onChange={(e) => { setMode(e.target.value as CommunicationMode); setDraft({ subject: '', body: '' });  }} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">
             <option value="mep-start">Mail de début de MEP</option>
             <option value="mep-end">Mail de fin de MEP</option>
             <option value="coproj">Compte rendu COPROJ (notes)</option>
@@ -328,9 +318,9 @@ ${JSON.stringify(buildContext(), null, 2)}`;
         </label>
         <div className="flex flex-wrap gap-2">
           <button onClick={copyDraft} className="px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Copier</button>
-          {mode !== 'coproj' && <button onClick={createOutlookDraft} disabled={busy} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Créer le brouillon Outlook</button>}
+          {mode !== 'coproj' && <button onClick={openOutlookClient} disabled={busy} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Ouvrir dans Outlook</button>}
         </div>
-        {savedDraftId && <p className="text-xs text-emerald-700 font-semibold">Brouillon enregistré dans Outlook. Référence : {savedDraftId}</p>}
+        
       </div>}
 
       {message && <p role="status" className="text-xs text-slate-600 bg-slate-50 rounded-lg p-3">{message}</p>}
