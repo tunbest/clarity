@@ -260,6 +260,10 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const tasks = (mep.tasks || []).map((task) => {
         if (task.projectTaskId) {
           const projectTask = project.tasks.find((item) => item.id === task.projectTaskId);
+          if (!projectTask) {
+            changed = true;
+            return { ...task, projectTaskId: undefined };
+          }
           if (projectTask) {
             const status: MepTaskStatus = projectTask.status === 'DONE' ? 'Terminé'
               : projectTask.status === 'IN_PROGRESS' ? 'En cours'
@@ -276,6 +280,10 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         }
         if (task.kind === 'Jalon' && task.projectMilestoneId) {
           const milestone = project.milestones.find((item) => item.id === task.projectMilestoneId);
+          if (!milestone) {
+            changed = true;
+            return { ...task, projectMilestoneId: undefined };
+          }
           if (milestone) {
             const status: MepTaskStatus = milestone.completed ? 'Terminé' : 'À faire';
             const offset = Math.round((new Date(`${dayStr(milestone.targetDate)}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
@@ -552,6 +560,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         status,
         startDate: dates.start,
         dueDate: dates.end,
+        milestoneId: linked.projectMilestoneId || projectTask.milestoneId,
+        tags: Array.from(new Set([...(projectTask.tags || []), `MEP:${mep.ref || mep.id}`])),
         completionPercent: status === 'DONE' ? 100 : status === 'IN_PROGRESS' ? Math.max(projectTask.completionPercent || 0, 50) : status === 'REVIEW' ? Math.max(projectTask.completionPercent || 0, 90) : 0,
       };
     });
