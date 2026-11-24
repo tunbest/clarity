@@ -425,7 +425,7 @@ export const App: React.FC = () => {
           /* Unified project and production workspace for project managers and production leads */
           <>
             {activeTab === 'PROD_RELEASES' && activeProject && (
-              <ProductionReleasePortal currentUser={currentUser} projects={projects} activeProjectId={activeProject.id} />
+              <ProductionReleasePortal currentUser={currentUser} projects={projects} activeProjectId={activeProject.id} onUpdateProject={handleUpdateProject} />
             )}
 
             {activeTab === 'PORTFOLIO' && (
