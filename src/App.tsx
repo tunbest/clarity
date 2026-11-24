@@ -96,6 +96,7 @@ export const App: React.FC = () => {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const workspaceRevisionRef = useRef(0);
   const workspaceWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const [workspaceImportVersion, setWorkspaceImportVersion] = useState(0);
   useEffect(() => {
     if (!currentUser) { setWorkspaceLoaded(false); return; }
     let active = true;
@@ -175,14 +176,24 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleDeleteProject = (projId: string) => {
+  const handleDeleteProject = async (projId: string) => {
     const remaining = projects.filter((p) => p.id !== projId);
-    if (remaining.length === 0) {
-      setProjects(INITIAL_PROJECTS);
-      setActiveProjectId(INITIAL_PROJECTS[0].id);
-    } else {
+    try {
+      await workspaceWriteQueue.current;
+      const response = await fetch('/api/workspace', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ projects: remaining, revision: workspaceRevisionRef.current }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Suppression du projet impossible.');
+      workspaceRevisionRef.current = Number(result.revision) || workspaceRevisionRef.current + 1;
       setProjects(remaining);
-      setActiveProjectId(remaining[0].id);
+      setActiveProjectId(remaining[0]?.id || '');
+      setWorkspaceError(null);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Suppression du projet impossible.');
     }
   };
 
@@ -254,33 +265,91 @@ export const App: React.FC = () => {
     handleUpdateProject({ ...activeProject, milestones: updatedMilestones, tasks: updatedTasks });
   };
 
-  // Data Export & Import Handlers
-  const handleExportData = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projects, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `cockpit_pm_export_${new Date().toISOString().split('T')[0]}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+  // Export / import of the complete project and production workspace.
+  const handleExportData = async () => {
+    try {
+      const response = await fetch('/api/meps', { credentials: 'same-origin' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Export des MEP impossible.');
+      const backup = {
+        format: 'clarity-workspace',
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        projects,
+        meps: data.meps || [],
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `clarity-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setWorkspaceError(null);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Export JSON impossible.');
+    }
   };
 
-  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const imported = JSON.parse(event.target?.result as string);
-        if (Array.isArray(imported) && imported.length > 0) {
-          setProjects(imported);
-          setActiveProjectId(imported[0].id);
-        }
-      } catch (err) {
-        console.error("Erreur lors de l'import JSON", err);
+    try {
+      const parsed = JSON.parse(await file.text());
+      const importedProjects: Project[] = Array.isArray(parsed) ? parsed : parsed?.projects;
+      if (!Array.isArray(importedProjects) || importedProjects.some((p: any) => !p || typeof p.id !== 'string' || typeof p.name !== 'string')) {
+        throw new Error('JSON invalide : fournissez un tableau de projets ou une sauvegarde Clarity { projects, meps }.');
       }
-    };
-    reader.readAsText(file);
+      const ids = new Set<string>();
+      for (const project of importedProjects) {
+        if (ids.has(project.id)) throw new Error(`Identifiant projet dupliqué : ${project.id}`);
+        ids.add(project.id);
+      }
+      const hasMepPayload = !Array.isArray(parsed) && (Array.isArray(parsed.meps) || Array.isArray(parsed.mep));
+      if (hasMepPayload) {
+        const meps = Array.isArray(parsed.meps) ? parsed.meps : parsed.mep;
+        const workspaceResponse = await fetch('/api/workspace', { credentials: 'same-origin' });
+        const workspace = await workspaceResponse.json();
+        const mepResponse = await fetch('/api/meps', { credentials: 'same-origin' });
+        const mepState = await mepResponse.json();
+        if (!workspaceResponse.ok || !mepResponse.ok) throw new Error('Impossible de lire les versions actuelles avant import.');
+        const importResponse = await fetch('/api/workspace/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            projects: importedProjects,
+            meps,
+            workspaceRevision: Number(workspace.revision),
+            mepRevision: Number(mepState.revision),
+          }),
+        });
+        const result = await importResponse.json().catch(() => ({}));
+        if (!importResponse.ok) throw new Error(result.error || 'Import complet refusé.');
+        workspaceRevisionRef.current = Number(result.workspaceRevision) || workspaceRevisionRef.current + 1;
+        setProjects(importedProjects);
+        setActiveProjectId(importedProjects[0]?.id || '');
+        setWorkspaceImportVersion((value) => value + 1);
+        setWorkspaceError(null);
+      } else {
+        await workspaceWriteQueue.current;
+        const response = await fetch('/api/workspace', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ projects: importedProjects, revision: workspaceRevisionRef.current }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Import projets refusé.');
+        workspaceRevisionRef.current = Number(result.revision) || workspaceRevisionRef.current + 1;
+        setProjects(importedProjects);
+        setActiveProjectId(importedProjects[0]?.id || '');
+        setWorkspaceError(null);
+      }
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Erreur lors de l’import JSON.');
+    }
   };
 
   // Risk Handlers
@@ -426,7 +495,7 @@ export const App: React.FC = () => {
           /* Unified project and production workspace for project managers and production leads */
           <>
             {activeTab === 'PROD_RELEASES' && activeProject && (
-              <ProductionReleasePortal currentUser={currentUser} projects={projects} activeProjectId={activeProject.id} onUpdateProject={handleUpdateProject} />
+              <ProductionReleasePortal key={workspaceImportVersion} currentUser={currentUser} projects={projects} activeProjectId={activeProject.id} onUpdateProject={handleUpdateProject} />
             )}
 
             {activeTab === 'PORTFOLIO' && (
@@ -576,7 +645,7 @@ export const App: React.FC = () => {
           project={projectModalState.project}
           onClose={() => setProjectModalState({ isOpen: false, project: null })}
           onSaveProject={handleSaveProject}
-          onDeleteProject={handleDeleteProject}
+          onDeleteProject={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR' ? handleDeleteProject : undefined}
         />
       )}
 
