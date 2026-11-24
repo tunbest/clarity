@@ -32,7 +32,7 @@ import {
   Info,
   RotateCcw
 } from 'lucide-react';
-import { AppUser, Project } from '../types';
+import { AppUser, Project, PortfolioScope } from '../types';
 import { CommunicationAssistant } from './CommunicationAssistant';
 
 export type ProdPilotPage =
@@ -174,6 +174,7 @@ export interface MepEntry {
   changeNumbers: string;
   ritmNumbers: string;
   itsmReferences?: MepItsmReference[];
+  trigrams?: string[];
   rollback: string;
   description: string;
   people: MepPerson[];
@@ -192,6 +193,7 @@ interface ProdPilotDb {
 interface ProdPilotWorkspaceProps {
   currentUser: AppUser;
   projects?: Project[];
+  scopes?: PortfolioScope[];
   activeProjectId?: string;
   onUpdateProject?: (project: Project) => void;
 }
@@ -413,6 +415,7 @@ const normalizeMep = (x: any, projects: Project[]): MepEntry => {
     changeNumbers: parseItsmNumbers(x.changeNumbers || x.changeRef || '').join(', '),
     ritmNumbers: parseItsmNumbers(x.ritmNumbers || '').join(', '),
     itsmReferences: normalizeItsmReferences(x.itsmReferences, String(x.changeNumbers || x.changeRef || ''), String(x.ritmNumbers || '')),
+    trigrams: Array.from(new Set((Array.isArray(x.trigrams) ? x.trigrams : String(x.runbook?.trigram || '').split(/[\\n,; ]+/)).map((t: any) => String(t || '').trim().toUpperCase()).filter(Boolean))),
     rollback: String(x.rollback || ''),
     description: String(x.description || ''),
     people: Array.isArray(x.people) ? x.people.map((p: any) => ({ name: String(p?.name || ''), role: String(p?.role || '') })) : [],
@@ -448,6 +451,7 @@ const getStatusBadgeClasses = (status: string) => {
 export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   currentUser,
   projects: clarityProjects = [],
+  scopes = [],
   activeProjectId,
   onUpdateProject,
 }) => {
@@ -768,6 +772,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       changeNumbers: '',
       ritmNumbers: '',
       itsmReferences: [],
+      trigrams: [],
       tasks: (source.tasks || []).map((task) => ({ ...task, id: uid('TASK'), status: 'À faire', projectTaskId: undefined, projectMilestoneId: undefined })),
       minutes: [],
       runbook: clonedRunbook,
@@ -887,6 +892,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               changeNumbers: cleanChanges.join(', '),
               ritmNumbers: cleanRitms.join(', '),
               itsmReferences,
+              trigrams: Array.from(new Set((mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()).filter(Boolean))),
               projectId: (mepForm.projectId || '').trim(),
               project: clarityProjects.find((p) => p.id === mepForm.projectId)?.name || '',
               people: cleanPeople,
@@ -914,6 +920,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         changeNumbers: cleanChanges.join(', '),
         ritmNumbers: cleanRitms.join(', '),
         itsmReferences,
+        trigrams: Array.from(new Set((mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()).filter(Boolean))),
         rollback: (mepForm.rollback || '').trim(),
         description: (mepForm.description || '').trim(),
         people: cleanPeople,
@@ -2786,6 +2793,13 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   />
                 </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Trigrammes concernés (un ou plusieurs)</label>
+                  <select multiple value={mepForm.trigrams || []} onChange={(e) => setMepForm({ ...mepForm, trigrams: Array.from(e.target.selectedOptions).map(o => o.value) })} className="w-full min-h-24 text-xs p-2.5 rounded-xl border border-slate-300 bg-white">
+                    {(scopes.find(s => s.id === clarityProjects.find(p => p.id === mepForm.projectId)?.scopeId)?.trigrams || Array.from(new Set(clarityProjects.find(p => p.id === mepForm.projectId)?.trigrams || []))).map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-1">Les trigrammes proposés proviennent du périmètre du projet. Ctrl/Cmd permet une sélection multiple.</p>
+                </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Version</label>
                   <input
