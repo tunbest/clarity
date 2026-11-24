@@ -484,7 +484,7 @@ app.get('/api/project-managers', async (_req: Request,res: Response) => {
 });
 app.post('/api/project-managers', async (req: Request,res: Response) => {
   const {displayName,email,password,jobTitle,department}=req.body||{};const cleanEmail=String(email||'').trim().toLowerCase();
-  if(!String(displayName||'').trim()||!/^\\S+@\\S+\\.\\S+$/.test(cleanEmail)||String(password||'').length<12)return res.status(400).json({error:'Nom, e-mail valide et mot de passe de 12 caractères minimum requis.'});
+  if(!String(displayName||'').trim()||!/^\S+@\S+\.\S+$/.test(cleanEmail)||String(password||'').length<12)return res.status(400).json({error:'Nom, e-mail valide et mot de passe de 12 caractères minimum requis.'});
   try{const id=randomUUID();const r=await getPgPool()!.query('INSERT INTO app_users(id,display_name,email,password_hash,role,job_title,department) VALUES($1,$2,$3,$4,\'CHEF_PROJET\',$5,$6) RETURNING id,display_name AS "displayName",email,job_title AS "jobTitle",department,disabled',[id,String(displayName).trim(),cleanEmail,await hashPassword(String(password)),jobTitle||'Chef de Projet',department||null]);res.status(201).json({success:true,manager:r.rows[0]});}
   catch(e:any){if(e.code==='23505')return res.status(409).json({error:'Cet e-mail existe déjà.'});throw e;}
 });
@@ -725,12 +725,14 @@ app.get('/api/portfolio/summary', (req: Request, res: Response) => {
 
 // 3. Projects Endpoints (CRUD)
 app.get('/api/projects', (req: Request, res: Response) => {
-  const projects = dbStore.getAllProjects();
+  const user=getUserFromRequest(req);const all=dbStore.getAllProjects();const projects=user.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===user.id):all;
   res.json({ success: true, count: projects.length, data: projects });
 });
 
 app.get('/api/projects/:id', (req: Request, res: Response) => {
   const project = dbStore.getProjectById(req.params.id);
+  const user=getUserFromRequest(req);
+  if (user.role==='CHEF_PROJET' && (project as any)?.managerId!==user.id) return res.status(404).json({error:'Projet introuvable.'});
   if (!project) {
     return res.status(404).json({ error: 'Projet introuvable.' });
   }
@@ -739,7 +741,8 @@ app.get('/api/projects/:id', (req: Request, res: Response) => {
 
 // CREATE PROJECT — Restricted to DIRECTEUR_PROJETS and ADMINISTRATEUR
 app.post('/api/projects', (req: Request, res: Response) => {
-  const user = getUserFromRequest(req);
+  const user = getUserFromRequest(req);const existing=dbStore.getProjectById(req.params.id);
+  if(user.role==='CHEF_PROJET' && (existing as any)?.managerId!==user.id)return res.status(404).json({error:'Projet introuvable.'});
   if (!RBAC.canCreateOrDeleteProject(user.role || 'DIRECTEUR_PROJETS')) {
     return res.status(403).json({
       error: 'Accès refusé : Seul le Directeur de Projets ou l’Administrateur est habilité à initialiser de nouveaux projets.',
@@ -784,7 +787,8 @@ app.post('/api/projects', (req: Request, res: Response) => {
 
 // UPDATE PROJECT
 app.put('/api/projects/:id', (req: Request, res: Response) => {
-  const user = getUserFromRequest(req);
+  const user = getUserFromRequest(req);const existing=dbStore.getProjectById(req.params.id);
+  if(user.role==='CHEF_PROJET' && (existing as any)?.managerId!==user.id)return res.status(404).json({error:'Projet introuvable.'});
   const updated = dbStore.updateProject(req.params.id, req.body, user);
   if (!updated) {
     return res.status(404).json({ error: 'Projet introuvable.' });
