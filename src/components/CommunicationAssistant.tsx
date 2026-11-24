@@ -245,7 +245,7 @@ ${JSON.stringify(buildContext(), null, 2)}`;
       </div>
 
       <div className="rounded-xl bg-sky-50 border border-sky-100 p-3 text-xs text-sky-900">
-        L’authentification Microsoft est indépendante de votre compte Clarity. Les jetons restent en mémoire de session ; aucun secret client n’est enregistré. La création Outlook utilise l’autorisation déléguée <b>Mail.ReadWrite</b> et ne déclenche jamais l’envoi du mail.
+        L’authentification Microsoft est indépendante de votre compte Clarity. Les jetons sont conservés dans le stockage de session MSAL ; aucun secret client n’est enregistré. La création Outlook utilise l’autorisation déléguée <b>Mail.ReadWrite</b> et ne déclenche jamais l’envoi du mail.
       </div>
 
       <div className="border border-slate-200 rounded-xl p-4 space-y-3">
@@ -267,7 +267,7 @@ ${JSON.stringify(buildContext(), null, 2)}`;
           <button onClick={saveSettings} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-2"><Save className="w-3.5 h-3.5" /> Enregistrer la configuration</button>
           <button onClick={connectCopilot} disabled={busy} className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Se connecter à Copilot</button>
         </div>
-        <p className="text-[11px] text-slate-500">Dans Entra ID, ajoutez l’autorisation déléguée Power Platform API → CopilotStudio.Copilots.Invoke. L’URL de redirection SPA doit correspondre à l’URL de Clarity.</p>
+        <p className="text-[11px] text-slate-500">Dans Entra ID, ajoutez les autorisations déléguées Power Platform API → CopilotStudio.Copilots.Invoke et Microsoft Graph → Mail.ReadWrite. Configurez l’URL de redirection SPA sur l’URL de Clarity et accordez le consentement demandé par votre organisation.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
