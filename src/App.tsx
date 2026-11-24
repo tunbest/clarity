@@ -10,7 +10,7 @@ import {
   AppUser,
   UserRole
 } from './types';
-import { INITIAL_PROJECTS, DEFAULT_KPI_WIDGETS } from './data/initialData';
+import { INITIAL_PROJECTS } from './data/initialData';
 import { calculateProjectMetrics } from './utils/pmCalculations';
 
 
@@ -36,14 +36,21 @@ import { AddEditRiskModal } from './components/AddEditRiskModal';
 import { AddEditProjectModal } from './components/AddEditProjectModal';
 import { LoginPage } from './components/LoginPage';
 
+const upsertById = <T extends { id: string }>(items: T[], item: T): T[] => {
+  const exists = items.some((current) => current.id === item.id);
+  return exists ? items.map((current) => (current.id === item.id ? item : current)) : [...items, item];
+};
+
 export type MainTab = 'DASHBOARD' | 'KANBAN' | 'GANTT' | 'TASKS' | 'RISKS' | 'TEAM' | 'PORTFOLIO' | 'ADMIN' | 'CONTRIBUTOR' | 'PROD_RELEASES';
+
+const PROJECT_MANAGER_TABS: MainTab[] = ['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'];
 
 const ROLE_PERMITTED_TABS: Record<UserRole, MainTab[]> = {
   ADMINISTRATEUR: ['ADMIN'],
   DIRECTEUR_PROJETS: ['PORTFOLIO', 'DASHBOARD', 'RISKS', 'TEAM'],
   PMO: ['PORTFOLIO', 'DASHBOARD', 'GANTT', 'TASKS', 'RISKS'],
-  CHEF_PROJET: ['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'],
-  CHEF_PROJET_PROD: ['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'],
+  CHEF_PROJET: PROJECT_MANAGER_TABS,
+  CHEF_PROJET_PROD: PROJECT_MANAGER_TABS,
   CONTRIBUTEUR: ['CONTRIBUTOR'],
 };
 
@@ -56,10 +63,10 @@ const getDefaultTabForRole = (role?: UserRole): MainTab => {
     case 'PMO':
       return 'PORTFOLIO';
     case 'CHEF_PROJET_PROD':
+    case 'CHEF_PROJET':
       return 'DASHBOARD';
     case 'CONTRIBUTEUR':
       return 'CONTRIBUTOR';
-    case 'CHEF_PROJET':
     default:
       return 'DASHBOARD';
   }
@@ -68,8 +75,6 @@ const getDefaultTabForRole = (role?: UserRole): MainTab => {
 export const App: React.FC = () => {
   // Server-side session: the HttpOnly cookie is the only authentication source.
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
-
-  const [isLoginPageView, setIsLoginPageView] = useState(false);
 
   useEffect(() => { let active = true; fetch('/api/auth/me', { credentials: 'same-origin' }).then(async (r) => { if (!r.ok) throw new Error('Session indisponible'); return r.json(); }).then((data) => { if (active) setCurrentUser(data.isAuthenticated ? data.user : null); }).catch((err) => { console.error('Vérification de session impossible:', err); if (active) setWorkspaceError('Impossible de joindre le serveur Clarity.'); }); return () => { active = false; }; }, []);
 
@@ -156,7 +161,7 @@ export const App: React.FC = () => {
 
   // Project Handlers
   const handleUpdateProject = (updated: Project) => {
-    setProjects(projects.map((p) => (p.id === updated.id ? updated : p)));
+    setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
   };
 
   const handleSaveProject = (savedProj: Project) => {
@@ -184,14 +189,7 @@ export const App: React.FC = () => {
   // Task Handlers
   const handleSaveTask = (task: Task) => {
     if (!activeProject) return;
-    const taskExists = activeProject.tasks.some((t) => t.id === task.id);
-    let updatedTasks: Task[];
-    if (taskExists) {
-      updatedTasks = activeProject.tasks.map((t) => (t.id === task.id ? task : t));
-    } else {
-      updatedTasks = [...activeProject.tasks, task];
-    }
-    handleUpdateProject({ ...activeProject, tasks: updatedTasks });
+    handleUpdateProject({ ...activeProject, tasks: upsertById(activeProject.tasks, task) });
   };
 
   const handleUpdateTaskStatus = (taskId: string, newStatus: TaskStatus) => {
@@ -236,14 +234,7 @@ export const App: React.FC = () => {
   // Milestone Handlers
   const handleSaveMilestone = (ms: Milestone) => {
     if (!activeProject) return;
-    const exists = activeProject.milestones.some((m) => m.id === ms.id);
-    let updatedMilestones: Milestone[];
-    if (exists) {
-      updatedMilestones = activeProject.milestones.map((m) => (m.id === ms.id ? ms : m));
-    } else {
-      updatedMilestones = [...activeProject.milestones, ms];
-    }
-    handleUpdateProject({ ...activeProject, milestones: updatedMilestones });
+    handleUpdateProject({ ...activeProject, milestones: upsertById(activeProject.milestones, ms) });
   };
 
   const handleToggleMilestone = (milestoneId: string) => {
@@ -294,14 +285,7 @@ export const App: React.FC = () => {
   // Risk Handlers
   const handleSaveRisk = (risk: Risk) => {
     if (!activeProject) return;
-    const exists = activeProject.risks.some((r) => r.id === risk.id);
-    let updatedRisks: Risk[];
-    if (exists) {
-      updatedRisks = activeProject.risks.map((r) => (r.id === risk.id ? risk : r));
-    } else {
-      updatedRisks = [...activeProject.risks, risk];
-    }
-    handleUpdateProject({ ...activeProject, risks: updatedRisks });
+    handleUpdateProject({ ...activeProject, risks: upsertById(activeProject.risks, risk) });
   };
 
   const handleUpdateRiskStatus = (riskId: string, status: RiskStatus) => {
@@ -412,7 +396,6 @@ export const App: React.FC = () => {
         onOpenAI={() => setIsAIAssistantOpen(true)}
         onOpenCustomizer={() => setIsWidgetCustomizerOpen(true)}
         onOpenSettings={() => setProjectModalState({ isOpen: true, project: activeProject })}
-        onOpenLoginPage={() => {}}
         onLogout={handleLogout}
         onExportData={handleExportData}
         onImportData={handleImportData}
