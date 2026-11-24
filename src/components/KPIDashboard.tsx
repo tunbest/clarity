@@ -4,20 +4,9 @@ import {
   ProjectMetrics, 
   KPIWidget 
 } from '../types';
-import { 
-  formatCurrency, 
-  formatDateFR, 
-  generateSCurveData 
-} from '../utils/pmCalculations';
+import { formatDateFR } from '../utils/pmCalculations';
 import { 
   ResponsiveContainer, 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
   PieChart, 
   Pie, 
   Cell, 
@@ -26,9 +15,6 @@ import {
 } from 'recharts';
 import { 
   Activity, 
-  TrendingUp, 
-  TrendingDown, 
-  DollarSign, 
   CheckCircle2, 
   Clock, 
   AlertTriangle, 
@@ -77,17 +63,8 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
   const handleOpenCustomizer = onOpenCustomizer || onOpenCustomizeWidgets || (() => {});
   
   const metrics = incomingMetrics || {
-    BAC: project?.totalBudget || 0,
-    PV: 0,
-    EV: 0,
-    AC: 0,
-    CV: 0,
-    SV: 0,
-    CPI: 1,
     SPI: 1,
-    EAC: project?.totalBudget || 0,
-    ETC: 0,
-    VAC: 0,
+    SV: 0,
     progressPercent: 0,
     totalTasks: project?.tasks?.length || 0,
     completedTasks: project?.tasks?.filter(t => t.status === 'DONE')?.length || 0,
@@ -104,7 +81,6 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
     totalMilestones: project?.milestones?.length || 0,
   };
 
-  const sCurveData = generateSCurveData(project);
 
   // Status donut data
   const tasks = project?.tasks || [];
@@ -287,38 +263,6 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
             </span>
           </div>
 
-          {/* CPI (Cost Performance Index) */}
-          <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-200/60">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase">CPI (Coûts)</span>
-              {metrics.CPI >= 1.0 ? (
-                <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
-              ) : (
-                <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
-              )}
-            </div>
-            <div className="flex items-baseline gap-1 mt-1.5">
-              <span className="text-2xl font-black text-slate-900">{metrics.CPI}</span>
-            </div>
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border inline-block mt-1 ${getIndexColor(metrics.CPI, 1.0)}`}>
-              {metrics.CPI >= 1.0 ? 'Sous budget' : metrics.CPI >= 0.9 ? 'Dépassement faible' : 'Surcoût important'}
-            </span>
-          </div>
-
-          {/* Budget Consommé vs Total */}
-          <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-200/60">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase">Dépenses (AC)</span>
-              <DollarSign className="w-3.5 h-3.5 text-slate-600" />
-            </div>
-            <div className="flex items-baseline gap-1 mt-1.5">
-              <span className="text-lg font-black text-slate-900">{formatCurrency(metrics.AC, project.currency)}</span>
-            </div>
-            <span className="text-[10px] text-slate-500 block mt-1">
-              sur {formatCurrency(metrics.BAC, project.currency)} alloués
-            </span>
-          </div>
-
           {/* Risques & Alertes */}
           <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-200/60 cursor-pointer hover:bg-slate-100/80 transition-colors" onClick={() => onChangeTab('risks')}>
             <div className="flex items-center justify-between">
@@ -342,76 +286,30 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
       {/* Main Charts & Indicators Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-        {/* EVM S-Curve Chart (Large 8-col) */}
+        {/* Planning & delivery indicators */}
         <div className="lg:col-span-8 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <span>Courbe en S & Performance EVM (Earned Value)</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200">
-                  Temps Réel
-                </span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Comparaison entre Valeur Planifiée (PV), Valeur Acquise (EV), Coûts Réels (AC) et Projection
-              </p>
+              <h2 className="text-base font-bold text-slate-900">Respect du planning</h2>
+              <p className="text-xs text-slate-500 mt-1">Suivi de l'avancement par rapport à la période prévue du projet</p>
             </div>
-
-            <div className="flex items-center gap-2 text-xs">
-              <span className="flex items-center gap-1 font-medium text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> PV (Plan)
-              </span>
-              <span className="flex items-center gap-1 font-medium text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> EV (Acquis)
-              </span>
-              <span className="flex items-center gap-1 font-medium text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> AC (Dépenses)
-              </span>
+            <Calendar className="w-5 h-5 text-indigo-600"/>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">Indice de performance planning (SPI)</span>
+              <div className="text-3xl font-black text-slate-900 mt-2">{metrics.SPI}</div>
+              <span className={`inline-block mt-2 px-2 py-1 rounded-lg text-[10px] font-bold border ${getIndexColor(metrics.SPI,1)}`}>{metrics.SPI>=1?'En avance sur le planning':metrics.SPI>=0.9?'Léger retard':'Retard à traiter'}</span>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">Écart d'avancement vs planning</span>
+              <div className={`text-3xl font-black mt-2 ${metrics.SV>=0?'text-emerald-600':'text-rose-600'}`}>{metrics.SV>0?'+':''}{metrics.SV} pts</div>
+              <span className="text-[10px] text-slate-500 mt-2 block">Début : {formatDateFR(project.startDate)} · Fin prévue : {formatDateFR(project.endDate)}</span>
             </div>
           </div>
-
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={sCurveData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                <XAxis dataKey="month" stroke="#94A3B8" fontSize={11} tickLine={false} />
-                <YAxis 
-                  stroke="#94A3B8" 
-                  fontSize={11} 
-                  tickFormatter={(val) => `${(val / 1000).toFixed(0)}k€`}
-                  tickLine={false}
-                />
-                <Tooltip 
-                  formatter={(val: any) => formatCurrency(Number(val), project.currency)}
-                  contentStyle={{ backgroundColor: '#1E293B', borderRadius: '10px', border: 'none', color: '#F8FAFC', fontSize: '12px' }}
-                />
-                <Line type="monotone" dataKey="PV" stroke="#3B82F6" strokeWidth={2.5} dot={{ r: 3 }} name="Valeur Planifiée (PV)" />
-                <Line type="monotone" dataKey="EV" stroke="#10B981" strokeWidth={3} dot={{ r: 4 }} name="Valeur Acquise (EV)" />
-                <Line type="monotone" dataKey="AC" stroke="#EF4444" strokeWidth={2.5} dot={{ r: 3 }} name="Coût Réel (AC)" />
-                <Line type="monotone" dataKey="Forecast" stroke="#8B5CF6" strokeDasharray="4 4" strokeWidth={2} dot={false} name="Projection EAC" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-center text-xs">
-            <div className="bg-slate-50 p-2 rounded-lg">
-              <span className="text-slate-500 block">Écart Coûts (CV = EV - AC)</span>
-              <strong className={`text-sm ${metrics.CV >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {metrics.CV >= 0 ? '+' : ''}{formatCurrency(metrics.CV, project.currency)}
-              </strong>
-            </div>
-            <div className="bg-slate-50 p-2 rounded-lg">
-              <span className="text-slate-500 block">Écart Délais (SV = EV - PV)</span>
-              <strong className={`text-sm ${metrics.SV >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {metrics.SV >= 0 ? '+' : ''}{formatCurrency(metrics.SV, project.currency)}
-              </strong>
-            </div>
-            <div className="bg-slate-50 p-2 rounded-lg">
-              <span className="text-slate-500 block">Estimation à Clôture (EAC)</span>
-              <strong className="text-sm text-slate-800">
-                {formatCurrency(metrics.EAC, project.currency)}
-              </strong>
-            </div>
+          <div className="mt-4">
+            <div className="flex justify-between text-xs mb-1"><span className="font-semibold text-slate-600">Avancement réalisé</span><strong>{metrics.progressPercent}%</strong></div>
+            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-600 rounded-full" style={{width:`${metrics.progressPercent}%`}}/></div>
           </div>
         </div>
 
