@@ -44,7 +44,7 @@ const upsertById = <T extends { id: string }>(items: T[], item: T): T[] => {
 
 export type MainTab = 'DASHBOARD' | 'KANBAN' | 'GANTT' | 'TASKS' | 'RISKS' | 'TEAM' | 'PORTFOLIO' | 'ADMIN' | 'CONTRIBUTOR' | 'PROD_RELEASES';
 
-const PROJECT_MANAGER_TABS: MainTab[] = ['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'];
+const PROJECT_MANAGER_TABS: MainTab[] = ['PORTFOLIO', 'DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'];
 
 const ROLE_PERMITTED_TABS: Record<UserRole, MainTab[]> = {
   ADMINISTRATEUR: ['ADMIN'],
