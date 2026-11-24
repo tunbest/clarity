@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import { inflateRawSync } from 'node:zlib';
 import * as XLSX from 'xlsx';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
@@ -287,6 +288,27 @@ app.put('/api/scopes', async (req: Request, res: Response) => {
 });
 
 
+function extractOfficeXml(buffer: Buffer, matcher: RegExp): string[] {
+  const results: string[] = []; let eocd = -1;
+  for (let i = Math.max(0, buffer.length - 65557); i <= buffer.length - 22; i++) { if (buffer.readUInt32LE(i) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) return results;
+  const count = buffer.readUInt16LE(eocd + 10); let offset = buffer.readUInt32LE(eocd + 16);
+  for (let i = 0; i < count && offset + 46 <= buffer.length; i++) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) break;
+    const method = buffer.readUInt16LE(offset + 10); const size = buffer.readUInt32LE(offset + 20);
+    const nameLen = buffer.readUInt16LE(offset + 28); const extraLen = buffer.readUInt16LE(offset + 30); const commentLen = buffer.readUInt16LE(offset + 32);
+    const local = buffer.readUInt32LE(offset + 42); const name = buffer.subarray(offset + 46, offset + 46 + nameLen).toString('utf8');
+    if (matcher.test(name) && local + 30 <= buffer.length) {
+      const localName = buffer.readUInt16LE(local + 26); const localExtra = buffer.readUInt16LE(local + 28); const start = local + 30 + localName + localExtra;
+      const raw = buffer.subarray(start, start + size);
+      try { const data = method === 0 ? raw : method === 8 ? inflateRawSync(raw) : Buffer.alloc(0); if (data.length) results.push(data.toString('utf8')); } catch { /* skip unreadable part */ }
+    }
+    offset += 46 + nameLen + extraLen + commentLen;
+  }
+  return results;
+}
+function cleanOfficeXml(value: string): string { return value.replace(/<a:br\\s*\\/>/g, '\\n').replace(/<\\/(?:a:p|w:p)>/g, '\\n').replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/[ \\t]+/g,' ').replace(/\\n{3,}/g,'\\n\\n').trim(); }
+
 app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
   try {
     const { fileName, fileBase64 } = req.body || {};
@@ -304,10 +326,8 @@ app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
       extracted = workbook.SheetNames.map(name => 'FEUILLE: ' + name + '\\n' + XLSX.utils.sheet_to_csv(workbook.Sheets[name])).join('\\n\\n');
     } else if (ext === 'csv' || ext === 'txt') extracted = buffer.toString('utf8');
     else if (ext === 'pdf') parts.push({ inlineData: { mimeType: 'application/pdf', data: fileBase64 } });
-    else if (ext === 'pptx' || ext === 'docx') {
-      extracted = buffer.toString('binary').replace(/[^\\x20-\\x7E\\n\\r]/g, ' ').replace(/<[^>]+>/g, ' ').replace(/\\s{2,}/g, ' ');
-      extracted = extracted.slice(0, 150000);
-    }
+    else if (ext === 'pptx') extracted = extractOfficeXml(buffer, /^ppt\\/slides\\/slide\\d+\\.xml$/).map(cleanOfficeXml).join('\\n\\n');
+    else if (ext === 'docx') extracted = extractOfficeXml(buffer, /^word\\/document\\.xml$/).map(cleanOfficeXml).join('\\n');
     if (!parts.length && extracted.trim().length < 20) return res.status(422).json({ error: 'Aucun texte exploitable trouvé dans le fichier.' });
     const prompt = 'Analyse ce document pour Clarity PM. Retourne uniquement un JSON avec format clarity-ai-import, version 1, scopes[], projects[], meps[], coprojMeetings[], reviewItems[], sourceSummary. Chaque scope: code,name,description,trigrams[]. Chaque project: code,name,description,scopeCode,trigrams[]. Chaque MEP: ref,title,projectCode,trigrams[],version,date,owner,environment,status,priority,changeNumbers[],ritmNumbers[],description,rollback,people[],tasks[],runbook{prerequisites[],executionSteps[]}. Chaque COPROJ: projectCode,date,subject,attendees[],summary,decisions[],actions[{title,owner,dueDate,status}],risks[]. Le Directeur de projets crée les périmètres. Un périmètre contient plusieurs trigrammes et projets. Une MEP peut porter plusieurs trigrammes. COPROJ est rattaché au projet, jamais à une MEP. ServiceNow est manuel, ne prétends pas vérifier les tickets. N’invente rien : place les données incertaines dans reviewItems. Conserve exactement les références CHG et RITM. Ne confonds pas code application et trigramme.\\n\\n' + extracted;
     parts.unshift({ text: prompt });
