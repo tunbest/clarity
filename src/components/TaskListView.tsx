@@ -5,7 +5,7 @@ import {
   TaskStatus, 
   PriorityLevel 
 } from '../types';
-import { formatDateFR, formatCurrency } from '../utils/pmCalculations';
+import { formatDateFR } from '../utils/pmCalculations';
 import { 
   Search, 
   Filter, 
