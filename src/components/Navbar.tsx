@@ -15,9 +15,7 @@ import {
   Settings as SettingsIcon,
   CheckCircle2,
   AlertTriangle,
-  Flame,
   ShieldCheck,
-  User as UserIcon,
   Rocket
 } from 'lucide-react';
 import { Project, ProjectMetrics, AppUser, UserRole } from '../types';
@@ -35,7 +33,6 @@ interface NavbarProps {
   onOpenAI: () => void;
   onOpenCustomizer: () => void;
   onOpenSettings: () => void;
-  onOpenLoginPage: () => void;
   onLogout: () => void;
   onExportData: () => void;
   onImportData: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -55,7 +52,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAI,
   onOpenCustomizer,
   onOpenSettings,
-  onOpenLoginPage,
   onLogout,
   onExportData,
   onImportData,
@@ -129,28 +125,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           { id: 'risks', label: 'Revue des Risques & Alertes', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
         ];
       case 'CHEF_PROJET_PROD':
+      case 'CHEF_PROJET':
         return [
-          { id: 'dashboard', label: 'Vue projet & KPIs', icon: LayoutDashboard },
-          { id: 'kanban', label: 'Kanban projet', icon: FolderKanban },
+          { id: 'dashboard', label: 'Tableau de bord & KPIs', icon: LayoutDashboard },
+          { id: 'kanban', label: 'Tableau Kanban', icon: FolderKanban },
           { id: 'gantt', label: 'Planning & jalons', icon: Calendar },
-          { id: 'tasks', label: 'Tâches projet', icon: ListTodo },
-          { id: 'risks', label: 'Risques', icon: ShieldAlert },
-          { id: 'team', label: 'Équipe projet', icon: Users },
+          { id: 'tasks', label: 'Tâches & WBS', icon: ListTodo },
+          { id: 'risks', label: 'Risques & alertes', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
+          { id: 'team', label: 'Équipe & ressources', icon: Users },
           { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
       case 'CONTRIBUTEUR':
         return [
           { id: 'my_tasks', label: 'Mes Tâches & Mon Temps', icon: ListTodo },
         ];
-      case 'CHEF_PROJET':
       default:
         return [
           { id: 'dashboard', label: 'Tableau de bord & KPIs', icon: LayoutDashboard },
           { id: 'kanban', label: 'Tableau Kanban', icon: FolderKanban },
-          { id: 'gantt', label: 'Chronogramme Gantt', icon: Calendar },
-          { id: 'tasks', label: 'Grille WBS & Tâches', icon: ListTodo },
-          { id: 'risks', label: 'Matrice des Risques', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
-          { id: 'workload', label: 'Charge & Ressources', icon: Users },
+          { id: 'gantt', label: 'Planning & jalons', icon: Calendar },
+          { id: 'tasks', label: 'Tâches & WBS', icon: ListTodo },
+          { id: 'risks', label: 'Risques & alertes', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
+          { id: 'team', label: 'Équipe & ressources', icon: Users },
           { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
     }
