@@ -38,7 +38,7 @@ function getUserFromRequest(req: Request): AppUser {
 // Strict RBAC Permission Evaluator
 const RBAC = {
   canCreateOrDeleteProject: (role: UserRole) => {
-    return role === 'DIRECTEUR_PROJETS' || role === 'ADMINISTRATEUR';
+    return role === 'DIRECTEUR_PROJETS' || role === 'CHEF_PROJET' || role === 'ADMINISTRATEUR';
   },
   canManageResources: (role: UserRole) => {
     return role === 'DIRECTEUR_PROJETS' || role === 'ADMINISTRATEUR';
@@ -251,7 +251,7 @@ app.use('/api', async (req: Request, res: Response, next) => {
     if ((route.startsWith('/users') || route.startsWith('/admin') || route === '/schema/sql' || route === '/audit-logs') && role !== 'ADMINISTRATEUR') return res.status(403).json({error:'Accès administrateur requis.'});
     if ((route === '/projects' && method === 'POST' || /^\/projects\/[^/]+$/.test(route) && method === 'DELETE') && !RBAC.canCreateOrDeleteProject(role)) return res.status(403).json({error:'Droits insuffisants pour cette opération.'});
     if (route === '/workspace' && method === 'PUT' && role === 'CONTRIBUTEUR') return res.status(403).json({error:'Les contributeurs ne peuvent pas remplacer le portefeuille complet.'});
-    if (route === '/scopes' && write && !['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(role)) return res.status(403).json({error:'Seuls le Directeur de Projets ou l’Administrateur peuvent gérer les périmètres.'});
+    if (route === '/scopes' && write && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les trigrammes du périmètre.'});
     if (/^\/projects\/[^/]+$/.test(route) && method === 'PUT' && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','PMO'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour modifier ce projet.'});
     if (/^\/projects\/[^/]+\/team/.test(route) && write && !RBAC.canManageResources(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les ressources.'});
     if (/^\/projects\/[^/]+\/tasks/.test(route) && write && !RBAC.canManageTasks(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les tâches.'});
@@ -283,6 +283,24 @@ app.put('/api/scopes', async (req: Request, res: Response) => {
     for (const raw of scope.trigrams) { const value = String(raw || '').trim().toUpperCase(); if (!value || value.length > 20 || trigramSet.has(value)) return res.status(400).json({ error: 'Trigramme vide, trop long ou dupliqué dans un périmètre.' }); trigramSet.add(value); }
   }
   const normalizedScopes = scopes.map((s: any) => ({ ...s, code: s.code.trim().toUpperCase(), trigrams: Array.from(new Set(s.trigrams.map((t: string) => t.trim().toUpperCase()))) }));
+  const actor = getUserFromRequest(req);
+  if (actor.role === 'CHEF_PROJET') {
+    const current = await getPgPool()!.query('SELECT scopes FROM portfolio_scope_state WHERE id=1');
+    const previousScopes: any[] = current.rows[0]?.scopes || [];
+    if (previousScopes.length !== normalizedScopes.length || previousScopes.some((oldScope: any) => {
+      const next = normalizedScopes.find((item: any) => item.id === oldScope.id);
+      return !next || next.code !== oldScope.code || next.name !== oldScope.name || (next.description || '') !== (oldScope.description || '');
+    })) return res.status(403).json({ error: 'Le Chef de Projet peut gérer les trigrammes, mais pas créer, supprimer ou renommer les périmètres.' });
+    const workspace = await getPgPool()!.query('SELECT projects FROM workspace_state WHERE id=1');
+    const assignedProjects: any[] = workspace.rows[0]?.projects || [];
+    for (const project of assignedProjects) {
+      const scope = normalizedScopes.find((item: any) => item.id === project.scopeId);
+      const previousScope = previousScopes.find((item: any) => item.id === project.scopeId);
+      const removed = (project.trigrams || []).filter((trigram: string) => !(scope?.trigrams || []).includes(String(trigram).toUpperCase()));
+      if (removed.length) return res.status(409).json({ error: 'Impossible de supprimer un trigramme encore rattaché à un projet. Réaffectez d’abord les projets concernés.' });
+      if (!scope && previousScope) return res.status(409).json({ error: 'Un périmètre utilisé ne peut pas être supprimé.' });
+    }
+  }
   const result = await getPgPool()!.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(normalizedScopes), revision]);
   if (!result.rowCount) return res.status(409).json({ error: 'Les périmètres ont été modifiés par un autre utilisateur. Rechargez la page.' });
   res.json({ success: true, revision: Number(result.rows[0].revision), updatedAt: result.rows[0].updated_at });
