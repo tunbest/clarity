@@ -71,13 +71,12 @@ export interface TeamMember {
 
 export type WidgetType = 
   | 'STAT_CARD' 
-  | 'EARNED_VALUE_CHART' 
   | 'BURNDOWN_CHART' 
   | 'WORKLOAD_BAR' 
   | 'TASK_STATUS_PIE' 
   | 'RISK_HEATMAP' 
   | 'MILESTONE_TIMELINE' 
-  | 'SPI_CPI_RADAR';
+;
 
 export interface KPIWidget {
   id: string;
