@@ -56,14 +56,13 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         code: project.code,
         status: project.status,
         progress: metrics.progressPercent,
-        totalBudget: metrics.BAC,
-        spentBudget: metrics.AC,
         spi: metrics.SPI,
-        cpi: metrics.CPI,
         totalTasksCount: metrics.totalTasks,
         completedTasksCount: metrics.completedTasks,
         overdueTasksCount: metrics.overdueTasks,
         activeRisksCount: metrics.criticalRisksCount,
+        overdueTasksCount: metrics.overdueTasks,
+        blockedTasksCount: metrics.blockedTasks,
         risks: project.risks.map((r) => ({ title: r.title, p: r.probability, i: r.impact, plan: r.mitigationPlan })),
         milestones: project.milestones.map((m) => ({ title: m.title, targetDate: m.targetDate, completed: m.completed })),
       };
@@ -83,10 +82,10 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
       console.warn('Utilisation du moteur d’audit de secours:', err);
       // Fallback
       setAuditResult({
-        summary: `Audit synthétique : Le projet "${project.name}" présente un taux d'avancement de ${metrics.progressPercent}%. Les indicateurs de coûts (CPI: ${metrics.CPI}) et de délais (SPI: ${metrics.SPI}) reflètent une trajectoire opérationnelle active nécessitant un suivi attentif du chemin critique.`,
+        summary: `Audit opérationnel : le projet "${project.name}" présente ${metrics.progressPercent}% d'avancement. Le SPI (${metrics.SPI}) et les risques actifs déterminent les priorités de suivi du chemin critique.`,
         strengths: [
           metrics.SPI >= 1 ? `Calendrier maîtrisé avec un SPI de ${metrics.SPI}` : "Mobilisation soutenue de l'équipe",
-          metrics.CPI >= 1 ? `Contrôle budgétaire optimal (CPI de ${metrics.CPI})` : "Objectifs et jalons structurés",
+          `${metrics.completedMilestones}/${metrics.totalMilestones} jalons terminés`,
           `${metrics.completedTasks}/${metrics.totalTasks} tâches déjà livrées avec succès`
         ],
         alerts: [
@@ -115,10 +114,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         description: project.description,
         status: project.status,
         progress: metrics.progressPercent,
-        totalBudget: metrics.BAC,
-        spentBudget: metrics.AC,
         spi: metrics.SPI,
-        cpi: metrics.CPI,
         totalTasksCount: metrics.totalTasks,
         completedTasksCount: metrics.completedTasks,
         activeRisksCount: metrics.criticalRisksCount,
@@ -134,7 +130,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
       setReportMarkdown(data.reportMarkdown || '');
     } catch (err) {
       console.error(err);
-      setReportMarkdown(`## Flash Report - ${project.name}\nAvancement : ${metrics.progressPercent}% | Santé : ${metrics.healthScore}/100\nSPI : ${metrics.SPI} | CPI : ${metrics.CPI}`);
+      setReportMarkdown(`## Flash Report - ${project.name}\nAvancement : ${metrics.progressPercent}% | Santé : ${metrics.healthScore}/100\nSPI planning : ${metrics.SPI}\nTâches en retard : ${metrics.overdueTasks}\nRisques critiques : ${metrics.criticalRisksCount}`);
     } finally {
       setLoading(false);
     }
@@ -284,7 +280,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
                     Diagnostic Approfondi du Projet
                   </h3>
                   <p className="text-xs text-indigo-700 mt-0.5">
-                    Analyse en temps réel de la courbe EVM (SPI/CPI), des risques résiduels et de l'alignement des jalons.
+                    Analyse en temps réel du planning, des risques techniques, de la charge et de l'alignement des jalons.
                   </p>
                 </div>
                 <button
