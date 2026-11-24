@@ -1,5 +1,5 @@
-import React from 'react';
-import { Project } from '../types';
+import React, { useState } from 'react';
+import { Project, PortfolioScope } from '../types';
 import { calculateProjectMetrics, formatCurrency, formatDateFR } from '../utils/pmCalculations';
 import { 
   Layers, 
@@ -18,13 +18,29 @@ interface PortfolioOverviewProps {
   projects: Project[];
   onSelectProject: (projectId: string) => void;
   onOpenNewProject: () => void;
+  scopes?: PortfolioScope[];
+  canManageScopes?: boolean;
+  onSaveScopes?: (scopes: PortfolioScope[]) => Promise<void>;
+  onUpdateProject?: (project: Project) => void;
 }
 
 export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
   projects,
   onSelectProject,
   onOpenNewProject,
+  scopes = [],
+  canManageScopes = false,
+  onSaveScopes,
+  onUpdateProject,
 }) => {
+  const [scopeCode, setScopeCode] = useState('');
+  const [scopeName, setScopeName] = useState('');
+  const [scopeTrigrams, setScopeTrigrams] = useState('');
+  const [scopeError, setScopeError] = useState('');
+  const [scopeBusy, setScopeBusy] = useState(false);
+  const saveScopeList = async (next: PortfolioScope[]) => { if (!onSaveScopes) return; setScopeBusy(true); setScopeError(''); try { await onSaveScopes(next); } catch (e) { setScopeError(e instanceof Error ? e.message : 'Enregistrement impossible'); } finally { setScopeBusy(false); } };
+  const addScope = async () => { const code=scopeCode.trim().toUpperCase(); const name=scopeName.trim(); if(!code || !name) { setScopeError('Code et nom du périmètre obligatoires.'); return; } if(scopes.some(s=>s.code.toUpperCase()===code)) { setScopeError('Ce code de périmètre existe déjà.'); return; } const trigrams=Array.from(new Set(scopeTrigrams.split(/[\\n,; ]+/).map(x=>x.trim().toUpperCase()).filter(Boolean))); const now=new Date().toISOString(); await saveScopeList([...scopes,{id:'SCOPE-'+Math.random().toString(36).slice(2,9).toUpperCase(),code,name,trigrams,createdAt:now,updatedAt:now}]); setScopeCode(''); setScopeName(''); setScopeTrigrams(''); };
+
   // Compute portfolio aggregated KPIs
   const projectStats = projects.map((p) => {
     const metrics = calculateProjectMetrics(p);
@@ -79,6 +95,18 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
           <span>Créer un Nouveau Projet</span>
         </button>
       </div>
+
+      {canManageScopes && <section className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div><h2 className="text-sm font-extrabold text-slate-900">Périmètres et trigrammes</h2><p className="text-xs text-slate-500 mt-1">Le Directeur de projets crée les périmètres et leurs trigrammes. Les projets sont ensuite rattachés à un périmètre.</p></div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <input value={scopeCode} onChange={e=>setScopeCode(e.target.value)} placeholder="Code (ex. INFRA)" className="p-2.5 rounded-lg border border-slate-300 text-xs" />
+          <input value={scopeName} onChange={e=>setScopeName(e.target.value)} placeholder="Nom du périmètre" className="p-2.5 rounded-lg border border-slate-300 text-xs" />
+          <input value={scopeTrigrams} onChange={e=>setScopeTrigrams(e.target.value)} placeholder="Trigrammes : NET, VOI, SEC" className="p-2.5 rounded-lg border border-slate-300 text-xs" />
+          <button disabled={scopeBusy} onClick={addScope} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold disabled:opacity-50">Ajouter le périmètre</button>
+        </div>
+        {scopeError && <p className="text-xs text-rose-600">{scopeError}</p>}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{scopes.map(scope=><div key={scope.id} className="border border-slate-200 rounded-xl p-3 flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-slate-900">{scope.code} — {scope.name}</div><div className="flex flex-wrap gap-1 mt-2">{scope.trigrams.map(t=><span key={t} className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">{t}</span>)}</div><div className="text-[10px] text-slate-500 mt-2">{projects.filter(p=>p.scopeId===scope.id).length} projet(s)</div></div><button onClick={()=>{if(window.confirm('Supprimer ce périmètre ? Les projets associés doivent être réaffectés avant suppression.')){if(projects.some(p=>p.scopeId===scope.id)){setScopeError('Réaffectez les projets de ce périmètre avant de le supprimer.');return;}void saveScopeList(scopes.filter(s=>s.id!==scope.id));}}} className="text-xs text-rose-600 font-bold">Supprimer</button></div>)}</div>
+      </section>}
 
       {/* Aggregate Portfolio KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -181,6 +209,7 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
             <thead>
               <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
                 <th className="p-3">Projet & Code</th>
+                <th className="p-3">Périmètre / trigrammes</th>
                 <th className="p-3">Chef de Projet</th>
                 <th className="p-3">Statut</th>
                 <th className="p-3">Score Santé</th>
@@ -204,6 +233,9 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
                       </span>
                     </td>
 
+                    <td className="p-3">
+                      {canManageScopes ? <div className="space-y-1"><select value={project.scopeId || ''} onChange={e=>onUpdateProject?.({...project,scopeId:e.target.value || undefined})} className="w-full p-1.5 rounded border border-slate-200 text-[10px]"><option value="">Sans périmètre</option>{scopes.map(s=><option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}</select><div className="text-[10px] text-slate-500">{(project.trigrams || []).join(', ')}</div></div> : <span className="text-[10px]">{scopes.find(s=>s.id===project.scopeId)?.name || '—'}<br/>{(project.trigrams || []).join(', ')}</span>}
+                    </td>
                     <td className="p-3 text-slate-700 font-medium">
                       {project.managerName}
                     </td>
