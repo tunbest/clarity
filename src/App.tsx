@@ -8,7 +8,8 @@ import {
   TaskStatus, 
   RiskStatus,
   AppUser,
-  UserRole
+  UserRole,
+  PortfolioScope
 } from './types';
 import { INITIAL_PROJECTS } from './data/initialData';
 import { calculateProjectMetrics } from './utils/pmCalculations';
@@ -92,6 +93,8 @@ export const App: React.FC = () => {
 
   // Portefeuille centralisé dans PostgreSQL.
   const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
+  const [scopes, setScopes] = useState<PortfolioScope[]>([]);
+  const [scopesRevision, setScopesRevision] = useState(1);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const workspaceRevisionRef = useRef(0);
@@ -103,6 +106,21 @@ export const App: React.FC = () => {
     fetch('/api/workspace', { credentials: 'same-origin' }).then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Chargement du portefeuille impossible'); return data; }).then((snapshot) => { if (!active) return; setProjects(snapshot.projects || []); workspaceRevisionRef.current = snapshot.revision || 1; setWorkspaceLoaded(true); setWorkspaceError(null); }).catch((err) => { console.error(err); if (active) { setWorkspaceError(err.message || 'Impossible de charger le portefeuille serveur.'); setWorkspaceLoaded(false); } });
     return () => { active = false; };
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser) { setScopes([]); return; }
+    let active = true;
+    fetch('/api/scopes', { credentials: 'same-origin' }).then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Chargement des périmètres impossible'); return data; }).then((data) => { if (!active) return; setScopes(data.scopes || []); setScopesRevision(Number(data.revision) || 1); }).catch((err) => { console.error('Chargement périmètres:', err); if (active) setWorkspaceError(err.message || 'Chargement des périmètres impossible.'); });
+    return () => { active = false; };
+  }, [currentUser?.id]);
+
+  const handleSaveScopes = async (nextScopes: PortfolioScope[]) => {
+    const response = await fetch('/api/scopes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ scopes: nextScopes, revision: scopesRevision }) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Enregistrement des périmètres impossible.');
+    setScopes(nextScopes);
+    setScopesRevision(Number(result.revision) || scopesRevision + 1);
+  };
 
   const [activeProjectId, setActiveProjectId] = useState<string>(() => {
     return projects[0]?.id || 'proj-apollo-1';
@@ -499,12 +517,15 @@ export const App: React.FC = () => {
           /* Unified project and production workspace for project managers and production leads */
           <>
             {activeTab === 'PROD_RELEASES' && activeProject && (
-              <ProductionReleasePortal key={workspaceImportVersion} currentUser={currentUser} projects={projects} activeProjectId={activeProject.id} onUpdateProject={handleUpdateProject} />
+              <ProductionReleasePortal key={workspaceImportVersion} currentUser={currentUser} projects={projects} scopes={scopes} activeProjectId={activeProject.id} onUpdateProject={handleUpdateProject} />
             )}
 
             {activeTab === 'PORTFOLIO' && (
               <PortfolioOverview
                 projects={projects}
+                scopes={scopes}
+                canManageScopes={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR'}
+                onSaveScopes={handleSaveScopes}
                 onSelectProject={(id) => {
                   setActiveProjectId(id);
                   setActiveTab('DASHBOARD');
