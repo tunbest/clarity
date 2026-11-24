@@ -5,13 +5,11 @@ import {
   RiskCategory, 
   RiskStatus 
 } from '../types';
-import { formatCurrency } from '../utils/pmCalculations';
 import { 
   ShieldAlert, 
   Plus, 
   AlertTriangle, 
   CheckCircle2, 
-  DollarSign, 
   User, 
   Trash2, 
   Edit3,
@@ -23,7 +21,6 @@ interface RiskMatrixProps {
   onOpenRiskModal: (riskId?: string) => void;
   onDeleteRisk: (riskId: string) => void;
   onUpdateRiskStatus: (riskId: string, status: RiskStatus) => void;
-  hideFinancial?: boolean;
 }
 
 export const RiskMatrix: React.FC<RiskMatrixProps> = ({
@@ -31,7 +28,6 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
   onOpenRiskModal,
   onDeleteRisk,
   onUpdateRiskStatus,
-  hideFinancial = false,
 }) => {
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ACTIVE');
@@ -42,11 +38,6 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
     const matchesStatus = statusFilter === 'ALL' || r.status === statusFilter;
     return matchesCat && matchesStatus;
   });
-
-  // Calculate total financial exposure of active risks
-  const totalFinancialExposure = project.risks
-    .filter((r) => r.status === 'ACTIVE')
-    .reduce((sum, r) => sum + (Number(r.financialImpact) || 0), 0);
 
   // Helper for heatmap cell color
   const getCellColor = (prob: number, imp: number) => {
@@ -86,15 +77,6 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
         </div>
 
         <div className="flex items-center gap-4">
-          {!hideFinancial && (
-            <div className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-right">
-              <span className="text-[10px] uppercase font-bold text-slate-500 block">Exposition Financière</span>
-              <strong className="text-sm font-black text-rose-600">
-                {formatCurrency(totalFinancialExposure, project.currency)}
-              </strong>
-            </div>
-          )}
-
           <button
             onClick={() => onOpenRiskModal()}
             className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
@@ -188,7 +170,7 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
                   <span>Escalade COPIL</span>
                 </div>
                 <p className="text-[11px] text-rose-700">
-                  Impact majeur sur les délais ou le budget. Plan d'atténuation d'urgence obligatoire et suivi quotidien.
+                  Impact majeur sur la production, la disponibilité ou les délais. Plan d'atténuation d'urgence obligatoire et suivi quotidien.
                 </p>
               </div>
 
@@ -250,7 +232,6 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
               <option value="ALL">Toutes les catégories</option>
               <option value="TECHNIQUE">Technique</option>
               <option value="DELAIS">Délais</option>
-              <option value="BUDGET">Budget</option>
               <option value="RESSOURCES">Ressources</option>
               <option value="JURIDIQUE">Juridique / RGPD</option>
             </select>
@@ -268,7 +249,6 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
                 <th className="p-3">Gravité</th>
                 <th className="p-3">Plan d'Atténuation (Contre-mesures)</th>
                 <th className="p-3">Porteur</th>
-                {!hideFinancial && <th className="p-3 text-right">Impact Financier</th>}
                 <th className="p-3 text-center">Statut</th>
                 <th className="p-3 text-right">Actions</th>
               </tr>
@@ -277,7 +257,7 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredRisks.length === 0 ? (
                 <tr>
-                  <td colSpan={hideFinancial ? 8 : 9} className="p-8 text-center text-slate-400 font-medium">
+                  <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">
                     Aucun risque ne correspond aux filtres sélectionnés.
                   </td>
                 </tr>
@@ -324,12 +304,6 @@ export const RiskMatrix: React.FC<RiskMatrixProps> = ({
                           <span className="text-slate-400 italic">Non assigné</span>
                         )}
                       </td>
-
-                      {!hideFinancial && (
-                        <td className="p-3 text-right font-bold text-slate-900">
-                          {risk.financialImpact ? formatCurrency(risk.financialImpact, project.currency) : '-'}
-                        </td>
-                      )}
 
                       <td className="p-3 text-center">
                         <select
