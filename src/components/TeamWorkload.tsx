@@ -5,12 +5,11 @@ import {
   Task,
   AppUser
 } from '../types';
-import { formatCurrency, formatDateFR } from '../utils/pmCalculations';
+import { formatDateFR } from '../utils/pmCalculations';
 import { 
   Users, 
   UserPlus, 
   Clock, 
-  DollarSign, 
   AlertTriangle, 
   CheckCircle2, 
   Mail, 
@@ -40,7 +39,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [email, setEmail] = useState('');
-  const [hourlyRate, setHourlyRate] = useState(85);
   const [maxWeeklyHours, setMaxWeeklyHours] = useState(35);
   const [color, setColor] = useState('#4F46E5');
 
@@ -49,7 +47,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
     setName('');
     setRole('');
     setEmail('');
-    setHourlyRate(85);
     setMaxWeeklyHours(35);
     setColor('#4F46E5');
     setShowAddMember(true);
@@ -60,7 +57,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
     setName(m.name);
     setRole(m.role);
     setEmail(m.email);
-    setHourlyRate(m.hourlyRate || 85);
     setMaxWeeklyHours(m.maxWeeklyHours || 35);
     setColor(m.color || '#4F46E5');
     setShowAddMember(true);
@@ -78,7 +74,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
               name: name.trim(),
               role: role.trim() || 'Collaborateur',
               email: email.trim(),
-              hourlyRate: Number(hourlyRate) || 85,
               maxWeeklyHours: Number(maxWeeklyHours) || 35,
               color,
             }
@@ -91,7 +86,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
         name: name.trim(),
         role: role.trim() || 'Collaborateur',
         email: email.trim() || `${name.toLowerCase().replace(/\s+/g, '.')}@entreprise.fr`,
-        hourlyRate: Number(hourlyRate) || 85,
         maxWeeklyHours: Number(maxWeeklyHours) || 35,
         color,
       };
@@ -127,7 +121,7 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Suivi des capacités hebdomadaires, allocations des tâches, TJM et valorisation financière.
+            Suivi des capacités hebdomadaires, allocations des tâches et charge opérationnelle.
           </p>
         </div>
 
@@ -155,7 +149,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
           // Monthly capacity = weekly * 4
           const monthlyCapacity = (member.maxWeeklyHours || 35) * 4;
           const utilizationRate = Math.round((totalEstimatedHours / (monthlyCapacity || 1)) * 100);
-          const totalCostLogged = totalActualHours * (member.hourlyRate || 85);
 
           return (
             <div
@@ -198,12 +191,8 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
                   </div>
                 </div>
 
-                {/* Rates and Capacity */}
-                <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-100 text-xs">
-                  <div className="bg-slate-50 p-2 rounded-lg">
-                    <span className="text-[10px] text-slate-500 block">Taux Journalier/Horaire</span>
-                    <strong className="text-slate-900 font-bold">{member.hourlyRate} €/h</strong>
-                  </div>
+                {/* Capacity */}
+                <div className="mt-4 pt-3 border-t border-slate-100 text-xs">
                   <div className="bg-slate-50 p-2 rounded-lg">
                     <span className="text-[10px] text-slate-500 block">Capacité Mensuelle</span>
                     <strong className="text-slate-900 font-bold">{monthlyCapacity}h</strong>
@@ -266,14 +255,6 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
 
               </div>
 
-              {/* Bottom Cost Footer */}
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-slate-500">Coût réel engagé :</span>
-                <strong className="text-slate-900 font-bold text-sm">
-                  {formatCurrency(totalCostLogged, project.currency)}
-                </strong>
-              </div>
-
             </div>
           );
         })}
@@ -322,28 +303,9 @@ export const TeamWorkload: React.FC<TeamWorkloadProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Taux Horaire (€/h)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={hourlyRate}
-                    onChange={(e) => setHourlyRate(Number(e.target.value))}
-                    className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Capacité hebdo (h/sem)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="60"
-                    value={maxWeeklyHours}
-                    onChange={(e) => setMaxWeeklyHours(Number(e.target.value))}
-                    className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Capacité hebdomadaire (h/sem)</label>
+                <input type="number" min="1" max="60" value={maxWeeklyHours} onChange={(e) => setMaxWeeklyHours(Number(e.target.value))} className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg"/>
               </div>
 
               <div>
