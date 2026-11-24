@@ -320,3 +320,28 @@ Appliquer le moindre privilège, protéger les opérations destructrices, histor
 7. Publier les consignes d'utilisation et les limites du mode manuel ServiceNow.
 
 **Limite explicite :** ce lot met en œuvre la gestion des références ServiceNow dans Clarity PM, pas un connecteur ServiceNow ni le paramétrage automatique d'une instance Broadcom Clarity PPM. Ces travaux nécessitent les accès, licences, API et environnements de l'instance cible.
+
+
+## 12. Extension – périmètres, trigrammes et extraction documentaire IA
+
+### Hiérarchie portefeuille
+- Le Directeur de projets (ou Administrateur) crée les périmètres.
+- Un périmètre possède un code, un nom, une description et une liste de trigrammes.
+- Un projet est rattaché à un seul périmètre via `scopeId` et peut sélectionner un sous-ensemble de ses trigrammes via `trigrams[]`.
+- Une MEP reste rattachée à un seul projet et sélectionne un ou plusieurs trigrammes parmi ceux du projet/périmètre.
+- Les anciennes MEP conservent leur champ `runbook.trigram`; la normalisation le convertit en liste `trigrams[]` quand aucune liste n'existe.
+
+### Persistance et sécurité
+- Les périmètres sont stockés dans `portfolio_scope_state` (JSONB + révision).
+- Les projets conservent `scopeId` et `trigrams[]` dans l'agrégat portefeuille.
+- Seuls Directeur de projets et Administrateur peuvent créer/modifier/supprimer les périmètres.
+- Le JSON complet exporte les périmètres, projets et MEP ; la restauration complète met à jour les trois ensembles dans une transaction PostgreSQL.
+
+### Assistant IA – document vers JSON
+Formats acceptés : XLSX, XLS, CSV, PPTX, DOCX, PDF et TXT (12 Mo maximum). Le serveur extrait le texte des feuilles Excel, diapositives PowerPoint et documents Word ; les PDF sont transmis au moteur IA. Le résultat est un brouillon `clarity-ai-import` contenant `scopes[]`, `projects[]`, `meps[]`, `coprojMeetings[]` et `reviewItems[]`. Le JSON est téléchargeable depuis la vue Portefeuille. Aucun enregistrement métier n'est effectué automatiquement : un humain vérifie les correspondances, les doublons, les trigrammes et les Change/RITM avant intégration. Les CR COPROJ sont modélisés au niveau Projet, jamais sous une MEP.
+
+### Limites opérationnelles
+- L'extraction dépend de `GEMINI_API_KEY` et du service IA configuré.
+- Les PDF scannés nécessitent un OCR exploitable.
+- Les documents contenant des tableaux complexes, schémas ou captures peuvent nécessiter une validation manuelle.
+- Les références ServiceNow sont extraites comme texte, jamais vérifiées ni synchronisées.
