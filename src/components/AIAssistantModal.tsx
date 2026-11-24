@@ -61,7 +61,6 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         completedTasksCount: metrics.completedTasks,
         overdueTasksCount: metrics.overdueTasks,
         activeRisksCount: metrics.criticalRisksCount,
-        overdueTasksCount: metrics.overdueTasks,
         blockedTasksCount: metrics.blockedTasks,
         risks: project.risks.map((r) => ({ title: r.title, p: r.probability, i: r.impact, plan: r.mitigationPlan })),
         milestones: project.milestones.map((m) => ({ title: m.title, targetDate: m.targetDate, completed: m.completed })),
@@ -118,6 +117,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         totalTasksCount: metrics.totalTasks,
         completedTasksCount: metrics.completedTasks,
         activeRisksCount: metrics.criticalRisksCount,
+        overdueTasksCount: metrics.overdueTasks,
       };
 
       const res = await fetch('/api/pm-ai/copil-report', {
