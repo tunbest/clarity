@@ -21,6 +21,9 @@ interface PortfolioOverviewProps {
   onOpenNewProject: () => void;
   scopes?: PortfolioScope[];
   canManageScopes?: boolean;
+  canManageProjectCatalog?: boolean;
+  onImportCatalog?: (payload: any) => Promise<void>;
+  onEditProject?: (project: Project) => void;
   onSaveScopes?: (scopes: PortfolioScope[]) => Promise<void>;
   onUpdateProject?: (project: Project) => void;
 }
@@ -31,6 +34,9 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
   onOpenNewProject,
   scopes = [],
   canManageScopes = false,
+  canManageProjectCatalog = false,
+  onImportCatalog,
+  onEditProject,
   onSaveScopes,
   onUpdateProject,
 }) => {
@@ -39,7 +45,14 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
   const [scopeTrigrams, setScopeTrigrams] = useState('');
   const [scopeError, setScopeError] = useState('');
   const [scopeBusy, setScopeBusy] = useState(false);
+  const [trigramDrafts, setTrigramDrafts] = useState<Record<string, string>>({});
+  const [catalogError, setCatalogError] = useState('');
+  const [catalogBusy, setCatalogBusy] = useState(false);
   const saveScopeList = async (next: PortfolioScope[]) => { if (!onSaveScopes) return; setScopeBusy(true); setScopeError(''); try { await onSaveScopes(next); } catch (e) { setScopeError(e instanceof Error ? e.message : 'Enregistrement impossible'); } finally { setScopeBusy(false); } };
+  const addTrigram = async (scope: PortfolioScope) => { const value=(trigramDrafts[scope.id] || '').trim().toUpperCase(); if(!value || value.length>20){setScopeError('Saisissez un trigramme de 1 à 20 caractères.');return;} if(scope.trigrams.includes(value)){setScopeError('Ce trigramme existe déjà dans ce périmètre.');return;} await saveScopeList(scopes.map(s=>s.id===scope.id?{...s,trigrams:[...s.trigrams,value],updatedAt:new Date().toISOString()}:s)); setTrigramDrafts(current=>({...current,[scope.id]:''})); };
+  const removeTrigram = async (scope: PortfolioScope, trigram: string) => { if(projects.some(p=>p.scopeId===scope.id && (p.trigrams || []).includes(trigram))){setScopeError(`Impossible de supprimer ${trigram} : il est encore utilisé par un projet.`);return;} if(!window.confirm(`Supprimer le trigramme ${trigram} du périmètre ${scope.code} ?`))return; await saveScopeList(scopes.map(s=>s.id===scope.id?{...s,trigrams:s.trigrams.filter(t=>t!==trigram),updatedAt:new Date().toISOString()}:s)); };
+  const downloadCatalogTemplate = () => { const template={format:'clarity-catalog',version:1,description:'Modèle de création/mise à jour des périmètres, trigrammes et projets. Les trigrammes de chaque projet doivent exister dans son périmètre.',scopes:[{code:'INFRA',name:'Infrastructure',description:'Périmètre infrastructure',trigrams:['NET','SYS','SEC']}],projects:[{code:'PRJ-001',name:'Modernisation réseau',description:'Exemple de projet',scopeCode:'INFRA',trigrams:['NET','SEC']}]}; const blob=new Blob([JSON.stringify(template,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const link=document.createElement('a'); link.href=url; link.download='clarity-catalog-template.json'; link.click(); URL.revokeObjectURL(url); };
+  const importCatalogFile = async (event: React.ChangeEvent<HTMLInputElement>) => { const file=event.target.files?.[0]; if(!file)return; setCatalogBusy(true);setCatalogError('');try{const payload=JSON.parse(await file.text());await onImportCatalog?.(payload);}catch(error){setCatalogError(error instanceof Error?error.message:'Import JSON impossible.');}finally{setCatalogBusy(false);event.target.value='';} };
   const addScope = async () => { const code=scopeCode.trim().toUpperCase(); const name=scopeName.trim(); if(!code || !name) { setScopeError('Code et nom du périmètre obligatoires.'); return; } if(scopes.some(s=>s.code.toUpperCase()===code)) { setScopeError('Ce code de périmètre existe déjà.'); return; } const trigrams=Array.from(new Set(scopeTrigrams.split(/[\\n,; ]+/).map(x=>x.trim().toUpperCase()).filter(Boolean))); const now=new Date().toISOString(); await saveScopeList([...scopes,{id:'SCOPE-'+Math.random().toString(36).slice(2,9).toUpperCase(),code,name,trigrams,createdAt:now,updatedAt:now}]); setScopeCode(''); setScopeName(''); setScopeTrigrams(''); };
 
   // Compute portfolio aggregated KPIs
@@ -98,7 +111,7 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
       </div>
 
       {canManageScopes && <section className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-        <div><h2 className="text-sm font-extrabold text-slate-900">Périmètres et trigrammes</h2><p className="text-xs text-slate-500 mt-1">Le Directeur de projets crée les périmètres et leurs trigrammes. Les projets sont ensuite rattachés à un périmètre.</p></div>
+        <div><h2 className="text-sm font-extrabold text-slate-900">Administration des périmètres</h2><p className="text-xs text-slate-500 mt-1">Le Directeur de projets et l’administrateur créent, renomment et suppriment les périmètres.</p></div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
           <input value={scopeCode} onChange={e=>setScopeCode(e.target.value)} placeholder="Code (ex. INFRA)" className="p-2.5 rounded-lg border border-slate-300 text-xs" />
           <input value={scopeName} onChange={e=>setScopeName(e.target.value)} placeholder="Nom du périmètre" className="p-2.5 rounded-lg border border-slate-300 text-xs" />
@@ -106,7 +119,23 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
           <button disabled={scopeBusy} onClick={addScope} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold disabled:opacity-50">Ajouter le périmètre</button>
         </div>
         {scopeError && <p className="text-xs text-rose-600">{scopeError}</p>}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{scopes.map(scope=><div key={scope.id} className="border border-slate-200 rounded-xl p-3 flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-slate-900">{scope.code} — {scope.name}</div><div className="flex flex-wrap gap-1 mt-2">{scope.trigrams.map(t=><span key={t} className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">{t}</span>)}</div><div className="text-[10px] text-slate-500 mt-2">{projects.filter(p=>p.scopeId===scope.id).length} projet(s)</div></div><button onClick={()=>{if(window.confirm('Supprimer ce périmètre ? Les projets associés doivent être réaffectés avant suppression.')){if(projects.some(p=>p.scopeId===scope.id)){setScopeError('Réaffectez les projets de ce périmètre avant de le supprimer.');return;}void saveScopeList(scopes.filter(s=>s.id!==scope.id));}}} className="text-xs text-rose-600 font-bold">Supprimer</button></div>)}</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{scopes.map(scope=><div key={scope.id} className="border border-slate-200 rounded-xl p-3"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-slate-900">{scope.code} — {scope.name}</div><div className="text-[10px] text-slate-500 mt-1">{projects.filter(p=>p.scopeId===scope.id).length} projet(s)</div></div><button onClick={()=>{if(window.confirm('Supprimer ce périmètre ? Les projets associés doivent être réaffectés avant suppression.')){if(projects.some(p=>p.scopeId===scope.id)){setScopeError('Réaffectez les projets de ce périmètre avant de le supprimer.');return;}void saveScopeList(scopes.filter(s=>s.id!==scope.id));}}} className="text-xs text-rose-600 font-bold">Supprimer le périmètre</button></div>
+          <div className="flex flex-wrap gap-1 mt-3">{scope.trigrams.map(t=><span key={t} className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">{t}</span>)}</div>
+        </div>)}</div>
+      </section>}
+
+      {canManageProjectCatalog && <section className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 className="text-sm font-extrabold text-slate-900">Catalogue projets & trigrammes</h2><p className="text-xs text-slate-500 mt-1">Le Chef de Projet peut créer/supprimer ses projets et gérer les trigrammes dans les périmètres existants.</p></div>
+          <div className="flex flex-wrap gap-2"><button onClick={downloadCatalogTemplate} className="px-3 py-2 rounded-lg border border-indigo-200 text-indigo-700 text-xs font-bold">Télécharger le modèle JSON</button><label className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold cursor-pointer">{catalogBusy?'Import…':'Importer un JSON'}<input type="file" accept=".json,application/json" onChange={importCatalogFile} className="hidden" disabled={catalogBusy}/></label></div>
+        </div>
+        {catalogError && <p className="text-xs text-rose-600">{catalogError}</p>}
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="text-xs font-bold text-slate-700 mb-2">Vue graphique de la hiérarchie</div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">{scopes.map(scope=><div key={scope.id} className="rounded-xl border border-indigo-100 bg-white p-3 space-y-3"><div className="flex items-center justify-between"><div className="text-xs font-extrabold text-slate-900">{scope.code} — {scope.name}</div><span className="text-[10px] text-slate-500">{projects.filter(p=>p.scopeId===scope.id).length} projet(s)</span></div>
+            <div className="rounded-lg bg-indigo-50/70 p-2"><div className="text-[10px] font-bold text-indigo-800 mb-2">TRIGRAMMES DU PÉRIMÈTRE</div><div className="flex flex-wrap gap-1">{scope.trigrams.map(t=><span key={t} className="inline-flex items-center gap-1 rounded-full bg-white border border-indigo-100 px-2 py-1 text-[10px] font-bold text-indigo-800">{t}<button type="button" title={`Supprimer ${t}`} onClick={()=>void removeTrigram(scope,t)} className="text-rose-500 font-black" aria-label={`Supprimer le trigramme ${t}`}>×</button></span>)}</div>
+              <div className="flex gap-2 mt-2"><input value={trigramDrafts[scope.id] || ''} onChange={e=>setTrigramDrafts(current=>({...current,[scope.id]:e.target.value}))} placeholder="Nouveau trigramme" className="min-w-0 flex-1 p-2 rounded-lg border border-slate-200 text-xs"/><button disabled={scopeBusy} onClick={()=>void addTrigram(scope)} className="px-3 rounded-lg bg-indigo-600 text-white text-xs font-bold disabled:opacity-50">Ajouter</button></div></div>
+            <div><div className="text-[10px] font-bold text-slate-600 mb-2">PROJETS RATTACHÉS</div><div className="space-y-2">{projects.filter(p=>p.scopeId===scope.id).map(project=><div key={project.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2"><div className="min-w-0"><div className="text-xs font-bold text-slate-800 truncate">{project.code} — {project.name}</div><div className="text-[10px] text-slate-500">{(project.trigrams||[]).join(' · ') || 'Aucun trigramme affecté'}</div></div><button onClick={()=>onEditProject?.(project)} className="shrink-0 text-[10px] font-bold text-indigo-700">Modifier / supprimer</button></div>)}{!projects.some(p=>p.scopeId===scope.id)&&<p className="text-[10px] text-slate-400">Aucun projet dans ce périmètre.</p>}</div></div>
+          </div>)}</div>
+        </div>
       </section>}
 
       {canManageScopes && <AIImportAssistant />}
@@ -237,7 +266,7 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
                     </td>
 
                     <td className="p-3">
-                      {canManageScopes ? <div className="space-y-1"><select value={project.scopeId || ''} onChange={e=>{const scope=scopes.find(s=>s.id===e.target.value);onUpdateProject?.({...project,scopeId:e.target.value || undefined,trigrams:(project.trigrams || []).filter(t=>scope?.trigrams.includes(t))});}} className="w-full p-1.5 rounded border border-slate-200 text-[10px]"><option value="">Sans périmètre</option>{scopes.map(s=><option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}</select><div className="rounded-lg border border-slate-200 bg-white p-2 space-y-1 max-h-28 overflow-y-auto" aria-label="Trigrammes du projet">{(scopes.find(s=>s.id===project.scopeId)?.trigrams || []).map(t=><label key={t} className="flex items-center gap-2 text-[10px] cursor-pointer"><input type="checkbox" checked={(project.trigrams || []).includes(t)} onChange={e=>onUpdateProject?.({...project,trigrams:e.target.checked?Array.from(new Set([...(project.trigrams || []),t])):(project.trigrams || []).filter(x=>x!==t)})} className="accent-indigo-600"/><span>{t}</span></label>)}{!(scopes.find(s=>s.id===project.scopeId)?.trigrams || []).length && <span className="text-[10px] text-slate-400">Aucun trigramme dans ce périmètre</span>}</div></div> : <span className="text-[10px]">{scopes.find(s=>s.id===project.scopeId)?.name || '—'}<br/>{(project.trigrams || []).join(', ')}</span>}
+                      {canManageProjectCatalog ? <div className="space-y-1"><select value={project.scopeId || ''} onChange={e=>{const scope=scopes.find(s=>s.id===e.target.value);onUpdateProject?.({...project,scopeId:e.target.value || undefined,trigrams:(project.trigrams || []).filter(t=>scope?.trigrams.includes(t))});}} className="w-full p-1.5 rounded border border-slate-200 text-[10px]"><option value="">Sans périmètre</option>{scopes.map(s=><option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}</select><div className="rounded-lg border border-slate-200 bg-white p-2 space-y-1 max-h-28 overflow-y-auto" aria-label="Trigrammes du projet">{(scopes.find(s=>s.id===project.scopeId)?.trigrams || []).map(t=><label key={t} className="flex items-center gap-2 text-[10px] cursor-pointer"><input type="checkbox" checked={(project.trigrams || []).includes(t)} onChange={e=>onUpdateProject?.({...project,trigrams:e.target.checked?Array.from(new Set([...(project.trigrams || []),t])):(project.trigrams || []).filter(x=>x!==t)})} className="accent-indigo-600"/><span>{t}</span></label>)}{!(scopes.find(s=>s.id===project.scopeId)?.trigrams || []).length && <span className="text-[10px] text-slate-400">Aucun trigramme dans ce périmètre</span>}</div></div> : <span className="text-[10px]">{scopes.find(s=>s.id===project.scopeId)?.name || '—'}<br/>{(project.trigrams || []).join(', ')}</span>}
                     </td>
                     <td className="p-3 text-slate-700 font-medium">
                       {project.managerName}
