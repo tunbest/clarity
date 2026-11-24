@@ -1,56 +1,41 @@
-# Clarity PM – Transcription Teams et communication
+# Clarity PM – Teams Copilot et communication production
 
-## Fonctionnement
+## Architecture sans service de transcription
 
 Le module **Production / MEP → Assistant communication** propose :
-- mails de début et de fin de MEP préparés côté serveur ;
-- capture audio explicite d'une réunion Teams Desktop depuis Edge ou Chrome ;
-- transcription française par Whisper / faster-whisper hébergé sur le VPS ;
-- compte rendu COPROJ structuré à partir de la transcription ;
-- édition du sujet et du corps, copie et ouverture d'un nouveau message Outlook via `mailto:`.
+- génération des mails de début et de fin de MEP ;
+- préparation d'un compte rendu COPROJ depuis les notes ou la transcription fournies par Teams / Microsoft 365 Copilot ;
+- import de fichiers texte Teams `.vtt` et `.txt`, ou collage direct du contenu Copilot ;
+- édition du compte rendu, copie et ouverture d'un nouveau message Outlook via `mailto:`.
 
-Aucune intégration Copilot Studio, Microsoft Entra, Microsoft Graph ou Outlook API n'est utilisée. Clarity ne lit pas la boîte Outlook et n'envoie aucun e-mail. L'ouverture `mailto:` préremplit une fenêtre de composition du client configuré ; l'utilisateur vérifie et envoie manuellement.
+**Teams / Copilot réalise le travail de réunion. Clarity ne capture, n'enregistre et ne transcrit aucun audio.** Aucun conteneur Whisper, modèle local, GPU ou service de transcription supplémentaire n'est déployé sur le VPS.
 
-## Capture audio Teams Desktop
+## Utilisation pendant et après une réunion
 
-1. Ouvrir Clarity dans Edge ou Chrome via HTTPS et se connecter.
-2. Aller dans **Production / MEP → Assistant communication** et choisir **Transcription + CR COPROJ**.
-3. Cliquer **Démarrer l'écoute**.
-4. Dans le sélecteur du navigateur, choisir l'écran sur lequel Teams Desktop est affiché et activer **Partager l'audio du système**.
-5. Autoriser le microphone pour inclure également la voix locale. Si le microphone est refusé, seul l'audio système sera capturé.
-6. Cliquer **Arrêter et transcrire** à la fin de la réunion.
-7. Le fichier audio est envoyé au serveur privé Whisper du VPS ; le texte revient dans Clarity.
-8. Le serveur utilise la clé `GEMINI_API_KEY` déjà configurée dans Clarity pour produire le CR. Relire, corriger, puis copier ou ouvrir le brouillon dans Outlook.
+1. Démarrer la réunion dans Microsoft Teams.
+2. Utiliser Copilot dans la réunion pour demander les points abordés, les décisions, les actions, les responsables et les échéances. La disponibilité dépend de la licence Copilot et des politiques Microsoft 365 de l'organisation.
+3. Si Teams propose une transcription ou un récapitulatif exportable, récupérer le fichier `.vtt` / `.txt`. Sinon, copier les notes ou la réponse Copilot.
+4. Dans Clarity, ouvrir **Production / MEP → Assistant communication**, choisir **Compte rendu COPROJ**, puis le projet concerné.
+5. Importer le fichier texte ou coller les notes dans la zone de transcription.
+6. Cliquer **Générer le CR COPROJ**, relire les décisions, actions, propriétaires et dates, puis corriger les éléments incertains.
+7. Copier le compte rendu ou ouvrir un nouveau message Outlook.
 
-La capture nécessite une action explicite du navigateur et le partage de l'audio. Clarity n'écoute pas en arrière-plan. Le partage d'écran peut être interrompu par le navigateur ou l'utilisateur. Le navigateur enregistre l'audio pendant la réunion ; la transcription complète et le CR sont produits après l'arrêt, pas en direct.
+Le traitement de génération du compte rendu utilise le fournisseur IA déjà configuré côté serveur Clarity. Le contenu textuel et le contexte projet sont envoyés à ce fournisseur ; aucun flux audio n'est envoyé.
 
-## Déploiement Whisper sur le VPS
+## Limite importante : pas de transcription Teams activée
 
-Le workflow de déploiement ajoute un service Docker privé sur le réseau de l'application :
-- image CPU `onerahmet/openai-whisper-asr-webservice:v1.10.0` ;
-- moteur `faster_whisper` ;
-- modèle `base`, langue demandée `fr` ;
-- cache persistant Docker `whisper-cache` ;
-- API interne `http://whisper:9000/asr`, aucun port public exposé.
+Copilot peut, selon la licence, le type de réunion et les paramètres de l'organisation, répondre à des questions et produire des notes pendant la réunion sans activer la transcription classique. Cela ne signifie pas qu'un verbatim complet sera disponible après la réunion. Si aucune transcription ni notes Copilot exportables ne sont disponibles, Clarity ne peut pas reconstituer les paroles qui n'ont pas été capturées.
 
-Le modèle est téléchargé au premier démarrage. Prévoir environ 2,5 Go pour l'image Docker et de l'espace disque supplémentaire pour le cache du modèle. Le modèle `base` est un compromis de ressources ; un modèle `small` peut améliorer la précision au prix d'une consommation mémoire et d'un temps de traitement supérieurs.
+Clarity ne lit pas automatiquement la session Copilot et ne récupère pas le contenu Teams en arrière-plan. Cette version ne met en œuvre ni Microsoft Graph, ni Copilot Studio, ni accès Entra ID spécifique à la réunion.
 
-## Configuration
+## Outlook
 
-- `WHISPER_API_URL` : facultatif, défaut `http://whisper:9000/asr` ; ne doit pointer que vers un service Whisper de confiance.
-- `GEMINI_API_KEY` : déjà utilisée par le serveur Clarity pour la génération du compte rendu et des mails. L'audio n'est pas envoyé à Gemini ; seul le texte transcrit et le contexte métier sont utilisés pour générer le CR.
+L'ouverture via `mailto:` préremplit une fenêtre de composition du client de messagerie configuré. Clarity ne lit pas la boîte Outlook, ne crée pas directement un brouillon dans la boîte aux lettres et n'envoie aucun message. L'utilisateur vérifie et envoie manuellement.
 
-## Sécurité et confidentialité
+## Sécurité et exploitation
 
-- Les routes de transcription et de génération exigent une session Clarity valide.
-- Le service Whisper n'expose aucun port sur Internet ; il est joignable uniquement depuis le réseau Docker.
-- Les fichiers audio ne sont pas enregistrés dans PostgreSQL ni conservés par Clarity après la requête.
-- Les participants doivent être informés et les règles de l'entreprise relatives à l'enregistrement et aux données personnelles doivent être respectées.
-- Le compte rendu reste modifiable et n'est jamais envoyé automatiquement.
-
-## Limites connues
-
-- La capture audio système de Teams Desktop dépend du navigateur, de Windows et du périphérique audio. Utiliser Edge/Chrome à jour et partager l'écran entier avec l'audio système activé.
-- La capture du microphone local est demandée séparément ; si elle est refusée, la voix locale peut manquer.
-- La transcription n'identifie pas automatiquement de façon fiable chaque intervenant. Les noms, responsables et échéances absents de la transcription doivent rester « À confirmer ».
-- Les enregistrements très longs peuvent nécessiter davantage de mémoire et de temps CPU sur le VPS.
+- Aucun enregistrement audio ou fichier audio n'est conservé par Clarity.
+- Aucun service Whisper ou volume de cache Whisper n'est créé par le workflow de déploiement.
+- Les routes de génération restent soumises à la session Clarity.
+- Le compte rendu est un brouillon à valider ; ne jamais traiter une décision, une personne ou une échéance absente des notes comme un fait confirmé.
+- Informer les participants et respecter les règles internes de confidentialité et de protection des données.
