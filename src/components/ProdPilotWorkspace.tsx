@@ -589,8 +589,18 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       .filter((p) => p.name.trim())
       .map((p) => ({ name: p.name.trim(), role: (p.role || '').trim() }));
     const cleanTasks = taskDraft.map(normalizeTask);
+    const existingMep = db.mep.find((m) => m.id === editMepId);
+    const mepId = existingMep?.id || uid('MEP');
+    const mepRef = existingMep?.ref || `MEP-${mepId.slice(-5)}`;
     const targetProject = clarityProjects.find((p) => p.id === mepForm.projectId);
-    if (targetProject) syncLinkedProjectData({ ...(db.mep.find((m) => m.id === editMepId) || {} as MepEntry), ...mepForm, projectId: targetProject.id, date: mepForm.date || isoToday() } as MepEntry, cleanTasks);
+    if (existingMep && existingMep.projectId !== mepForm.projectId) {
+      const previousProject = clarityProjects.find((p) => p.id === existingMep.projectId);
+      if (previousProject && onUpdateProject) {
+        const previousTag = `MEP:${existingMep.ref || existingMep.id}`;
+        onUpdateProject({ ...previousProject, tasks: previousProject.tasks.map((task) => ({ ...task, tags: (task.tags || []).filter((tag) => tag !== previousTag) })) });
+      }
+    }
+    if (targetProject) syncLinkedProjectData({ ...(existingMep || {} as MepEntry), ...mepForm, id: mepId, ref: mepRef, projectId: targetProject.id, date: mepForm.date || isoToday() } as MepEntry, cleanTasks);
 
     if (editMepId) {
       const updatedMeps = db.mep.map((m) =>
@@ -608,10 +618,9 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       ) as MepEntry[];
       persistDb({ ...db, mep: updatedMeps });
     } else {
-      const id = uid('MEP');
       const newEntry: MepEntry = {
-        id,
-        ref: `MEP-${id.slice(-5)}`,
+        id: mepId,
+        ref: mepRef,
         projectId: (mepForm.projectId || '').trim(),
         project: clarityProjects.find((p) => p.id === mepForm.projectId)?.name || '',
         title: (mepForm.title || 'Nouvelle MEP').trim(),
