@@ -100,8 +100,20 @@ export interface KPIWidget {
   };
 }
 
+export interface PortfolioScope {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  trigrams: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Project {
   id: string;
+  scopeId?: string;
+  trigrams?: string[];
   code: string;
   name: string;
   description: string;
