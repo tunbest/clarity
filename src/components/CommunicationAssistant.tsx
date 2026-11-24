@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
-import { CopilotStudioClient } from '@microsoft/agents-copilotstudio-client';
+import { CopilotStudioClient, ConnectionSettings } from '@microsoft/agents-copilotstudio-client';
 import { Copy, Mail, FileText, Sparkles, Save, Settings2, Loader2, ExternalLink } from 'lucide-react';
 import { Project } from '../types';
 
@@ -92,13 +92,13 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const connectCopilot = async () => {
     setBusy(true); setMessage('');
     try {
-      const copilotSettings = {
+      const copilotSettings = new ConnectionSettings({
         environmentId: settings.environmentId.trim(),
         schemaName: settings.schemaName.trim(),
         tenantId: settings.tenantId.trim(),
         appClientId: settings.appClientId.trim(),
         authority: 'https://login.microsoftonline.com',
-      } as any;
+      });
       const token = await acquireMicrosoftToken([CopilotStudioClient.scopeFromSettings(copilotSettings)]);
       const client = new CopilotStudioClient(copilotSettings, token);
       const start = client.startConversationStreaming({ emitStartConversationEvent: false, locale: 'fr-FR' });
@@ -159,13 +159,13 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     }
     setBusy(true); setMessage('Génération avec Copilot Studio…'); setSavedDraftId('');
     try {
-      const copilotSettings = {
+      const copilotSettings = new ConnectionSettings({
         environmentId: settings.environmentId.trim(),
         schemaName: settings.schemaName.trim(),
         tenantId: settings.tenantId.trim(),
         appClientId: settings.appClientId.trim(),
         authority: 'https://login.microsoftonline.com',
-      } as any;
+      });
       const token = await acquireMicrosoftToken([CopilotStudioClient.scopeFromSettings(copilotSettings)]);
       const client = new CopilotStudioClient(copilotSettings, token);
       let conversationId = '';
