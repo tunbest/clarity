@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Project, ProjectStatus, PriorityLevel, ProjectLifecycleStatus } from '../types';
+import { Project, ProjectStatus, PriorityLevel, ProjectLifecycleStatus, PortfolioScope } from '../types';
 import { 
   X, 
   FolderPlus, 
@@ -20,6 +20,8 @@ interface AddEditProjectModalProps {
   onClose: () => void;
   onSaveProject: (project: Project) => void;
   onDeleteProject?: (projectId: string) => void;
+  scopes?: PortfolioScope[];
+  canManageScopes?: boolean;
 }
 
 const LIFECYCLE_PHASES: {
@@ -64,6 +66,8 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
   onClose,
   onSaveProject,
   onDeleteProject,
+  scopes = [],
+  canManageScopes = false,
 }) => {
   const [name, setName] = useState(project?.name || '');
   const [code, setCode] = useState(project?.code || `PRJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 899 + 100)}`);
@@ -84,6 +88,11 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
   );
   const [totalBudget, setTotalBudget] = useState(project?.totalBudget || 150000);
   const [currency, setCurrency] = useState(project?.currency || '€');
+  const [scopeId, setScopeId] = useState(project?.scopeId || '');
+  const [trigrams, setTrigrams] = useState<string[]>(project?.trigrams || []);
+  const selectedScope = scopes.find((scope) => scope.id === scopeId);
+  const availableTrigrams = selectedScope?.trigrams || [];
+  const toggleProjectTrigram = (trigram: string) => setTrigrams((current) => current.includes(trigram) ? current.filter((item) => item !== trigram) : [...current, trigram]);
 
   // Audio Recording & Transcription State via gemini-3.5-transcribe
   const [isRecording, setIsRecording] = useState(false);
@@ -219,6 +228,7 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
 
     const updatedProject: Project = {
       id: project?.id || `proj-${Date.now()}`,
+      ...(canManageScopes ? { scopeId: scopeId || undefined, trigrams: trigrams.filter((item) => availableTrigrams.includes(item)) } : { scopeId: project?.scopeId, trigrams: project?.trigrams }),
       name: name.trim(),
       code: code.trim().toUpperCase(),
       description: description.trim(),
@@ -427,6 +437,25 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
               )}
             </div>
           </div>
+
+          {canManageScopes && <section className="p-4 rounded-2xl border border-indigo-200 bg-indigo-50/50 space-y-3">
+            <div>
+              <h3 className="text-xs font-bold text-slate-900">Rattachement du projet</h3>
+              <p className="text-[11px] text-slate-600 mt-1">Un projet appartient à un seul périmètre et peut être associé à plusieurs trigrammes de ce périmètre.</p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Périmètre *</label>
+              <select required value={scopeId} onChange={(e) => { setScopeId(e.target.value); setTrigrams([]); }} className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-xl">
+                <option value="">Sélectionner un périmètre</option>
+                {scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.code} — {scope.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-2">Trigrammes rattachés au projet</label>
+              {!scopeId ? <p className="text-[11px] text-slate-500">Sélectionnez d'abord un périmètre.</p> : availableTrigrams.length === 0 ? <p className="text-[11px] text-amber-700">Aucun trigramme défini dans ce périmètre. Ajoutez-les dans la gestion des périmètres.</p> : <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{availableTrigrams.map((trigram) => <label key={trigram} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs cursor-pointer"><input type="checkbox" checked={trigrams.includes(trigram)} onChange={() => toggleProjectTrigram(trigram)} className="accent-indigo-600" /> <span className="font-semibold">{trigram}</span></label>)}</div>}
+              <p className="text-[10px] text-slate-500 mt-2">{trigrams.length} trigramme(s) sélectionné(s). Cette sélection définit ceux proposés dans les MEP de ce projet.</p>
+            </div>
+          </section>}
 
           {/* Client & Responsable */}
           <div className="grid grid-cols-2 gap-4">
