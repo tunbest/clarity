@@ -1,45 +1,29 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
-import { CopilotStudioClient, ConnectionSettings } from '@microsoft/agents-copilotstudio-client';
-import { Copy, Mail, FileText, Sparkles, Save, Settings2, Loader2, ExternalLink } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Copy, Mail, FileText, Sparkles, Loader2, Mic, Square, MonitorUp, AudioLines, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Project } from '../types';
 
 type CommunicationMode = 'mep-start' | 'mep-end' | 'coproj';
-interface CopilotSettings {
-  tenantId: string;
-  appClientId: string;
-  environmentId: string;
-  schemaName: string;
-}
 interface DraftContent { subject: string; body: string; }
-
-const SETTINGS_KEY = 'clarity.copilotStudio.settings.v1';
-const DEFAULT_SETTINGS: CopilotSettings = {
-  tenantId: '',
-  appClientId: '',
-  environmentId: '',
-  schemaName: 'cr299_clarity_tB6p_X',
-};
-const readSettings = (): CopilotSettings => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    return { ...DEFAULT_SETTINGS, ...saved };
-  } catch { return DEFAULT_SETTINGS; }
-};
 const asText = (value: unknown) => value == null || value === '' ? 'Non renseigné' : String(value);
 
 export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[] }> = ({ projects, meps }) => {
-  const [settings, setSettings] = useState<CopilotSettings>(readSettings);
   const [mode, setMode] = useState<CommunicationMode>('mep-start');
   const [selectedMepId, setSelectedMepId] = useState(meps[0]?.id || '');
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id || '');
-  const [meetingNotes, setMeetingNotes] = useState('');
   const [recipientText, setRecipientText] = useState('');
+  const [transcript, setTranscript] = useState('');
   const [draft, setDraft] = useState<DraftContent>({ subject: '', body: '' });
   const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState('');
-  const [connected, setConnected] = useState(false);
-  const [msal, setMsal] = useState<PublicClientApplication | null>(null);
+  const [notice, setNotice] = useState<'info' | 'success' | 'warning'>('info');
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const displayStreamRef = useRef<MediaStream | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const startedAtRef = useRef<number>(0);
 
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
   const selectedProject = useMemo(() => projects.find((p) => p.id === (mode === 'coproj' ? selectedProjectId : selectedMep?.projectId)), [projects, mode, selectedProjectId, selectedMep]);
@@ -48,70 +32,18 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     if (meps.length && !meps.some((m) => m.id === selectedMepId)) setSelectedMepId(meps[0].id);
   }, [meps, selectedMepId]);
 
-  const saveSettings = () => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    setMessage('Configuration enregistrée dans ce navigateur. Aucun secret client n’est stocké.');
-  };
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
 
-  const getMsal = async () => {
-    if (msal) return msal;
-    if (!settings.tenantId.trim() || !settings.appClientId.trim()) {
-      throw new Error('Renseignez le Tenant ID et le Client ID de votre application Microsoft Entra.');
-    }
-    const instance = new PublicClientApplication({
-      auth: {
-        clientId: settings.appClientId.trim(),
-        authority: `https://login.microsoftonline.com/${settings.tenantId.trim()}`,
-        redirectUri: window.location.origin,
-      },
-      cache: { cacheLocation: 'sessionStorage' },
-    });
-    await instance.initialize();
-    setMsal(instance);
-    return instance;
-  };
-
-  const acquireMicrosoftToken = async (scopes: string[]) => {
-    const instance = await getMsal();
-    const account = instance.getAllAccounts()[0];
-    if (account) {
-      try {
-        const silent = await instance.acquireTokenSilent({ scopes, account });
-        return silent.accessToken;
-      } catch (error) {
-        if (!(error instanceof InteractionRequiredAuthError)) throw error;
-        const popup = await instance.acquireTokenPopup({ scopes, account });
-        return popup.accessToken;
-      }
-    }
-    const result = await instance.loginPopup({ scopes, prompt: 'select_account' });
-    if (result.account) instance.setActiveAccount(result.account);
-    return result.accessToken;
-  };
-
-  const connectCopilot = async () => {
-    setBusy(true); setMessage('');
-    try {
-      const copilotSettings = new ConnectionSettings({
-        environmentId: settings.environmentId.trim(),
-        schemaName: settings.schemaName.trim(),
-        tenantId: settings.tenantId.trim(),
-        appClientId: settings.appClientId.trim(),
-        authority: 'https://login.microsoftonline.com',
-      });
-      const token = await acquireMicrosoftToken([CopilotStudioClient.scopeFromSettings(copilotSettings)]);
-      const client = new CopilotStudioClient(copilotSettings, token);
-      const start = client.startConversationStreaming({ emitStartConversationEvent: false, locale: 'fr-FR' });
-      let conversationId = '';
-      for await (const activity of start) conversationId = activity.conversation?.id || conversationId;
-      if (!conversationId) throw new Error('Copilot n’a pas retourné d’identifiant de conversation.');
-      setConnected(true);
-      setMessage('Connexion Copilot Studio établie.');
-    } catch (error) {
-      setConnected(false);
-      setMessage(error instanceof Error ? error.message : 'Connexion Copilot impossible.');
-    } finally { setBusy(false); }
-  };
+  useEffect(() => () => {
+    recorderRef.current?.state !== 'inactive' && recorderRef.current?.stop();
+    displayStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    void audioContextRef.current?.close();
+  }, []);
 
   const buildContext = () => {
     if (mode === 'coproj') {
@@ -121,158 +53,175 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         tasks: (project?.tasks || []).map((t) => ({ title: t.title, status: t.status, assignee: project?.members?.find((member) => member.id === t.assigneeId)?.name || t.assigneeId || 'Non affecté', startDate: t.startDate, dueDate: t.dueDate, completion: t.completionPercent })),
         milestones: (project?.milestones || []).map((m) => ({ title: m.title, targetDate: m.targetDate, completed: m.completed })),
         risks: (project?.risks || []).map((r) => ({ title: r.title, status: r.status, probability: r.probability, impact: r.impact, mitigation: r.mitigationPlan })),
-        meetingNotes,
       };
     }
     if (!selectedMep) return null;
     const project = projects.find((p) => p.id === selectedMep.projectId);
     return {
       mep: {
-        reference: selectedMep.ref || selectedMep.id,
-        title: selectedMep.title,
-        project: selectedMep.project,
-        version: selectedMep.version,
-        date: selectedMep.date,
-        owner: selectedMep.owner,
-        environment: selectedMep.environment,
-        status: selectedMep.status,
-        priority: selectedMep.priority,
-        goNoGo: selectedMep.goNoGo,
-        changeNumbers: selectedMep.changeNumbers,
-        ritmNumbers: selectedMep.ritmNumbers,
-        rollback: selectedMep.rollback,
-        description: selectedMep.description,
-        people: selectedMep.people,
-        tasks: selectedMep.tasks,
+        reference: selectedMep.ref || selectedMep.id, title: selectedMep.title, project: selectedMep.project,
+        version: selectedMep.version, date: selectedMep.date, owner: selectedMep.owner, environment: selectedMep.environment,
+        status: selectedMep.status, priority: selectedMep.priority, goNoGo: selectedMep.goNoGo,
+        changeNumbers: selectedMep.changeNumbers, ritmNumbers: selectedMep.ritmNumbers, rollback: selectedMep.rollback,
+        description: selectedMep.description, people: selectedMep.people, tasks: selectedMep.tasks,
       },
       project: project ? { code: project.code, name: project.name, status: project.status } : null,
     };
   };
 
-  const generate = async () => {
-    if (mode === 'coproj' && meetingNotes.trim().length < 20) {
-      setMessage('Ajoutez les notes ou la transcription de la réunion (20 caractères minimum).'); return;
-    }
-    if (mode !== 'coproj' && !selectedMep) { setMessage('Sélectionnez une MEP.'); return; }
-    if (!settings.environmentId.trim() || !settings.schemaName.trim()) {
-      setMessage('Complétez l’Environment ID et le Schema name Copilot Studio.'); return;
-    }
-    setBusy(true); setMessage('Génération avec Copilot Studio…'); 
+  const generateDraft = async (selectedMode: CommunicationMode, meetingTranscript = '') => {
+    if (selectedMode === 'coproj' && meetingTranscript.trim().length < 20) throw new Error('La transcription est trop courte pour préparer un compte rendu.');
+    if (selectedMode !== 'coproj' && !selectedMep) throw new Error('Sélectionnez une MEP.');
+    const response = await fetch('/api/communications/draft', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: selectedMode, context: buildContext(), transcript: meetingTranscript }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'La génération du brouillon a échoué.');
+    setDraft({ subject: String(result.subject || ''), body: String(result.body || '') });
+  };
+
+  const uploadRecording = async (blob: Blob) => {
+    if (!blob.size) { setMessage('Aucun son n’a été enregistré. Vérifiez le partage audio Teams.'); setNotice('warning'); return; }
+    setBusy(true); setMessage('Envoi sécurisé au serveur Whisper et transcription en français…'); setNotice('info');
     try {
-      const copilotSettings = new ConnectionSettings({
-        environmentId: settings.environmentId.trim(),
-        schemaName: settings.schemaName.trim(),
-        tenantId: settings.tenantId.trim(),
-        appClientId: settings.appClientId.trim(),
-        authority: 'https://login.microsoftonline.com',
+      const mime = blob.type || 'audio/webm';
+      const response = await fetch('/api/meetings/transcribe', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': mime }, body: blob,
       });
-      const token = await acquireMicrosoftToken([CopilotStudioClient.scopeFromSettings(copilotSettings)]);
-      const client = new CopilotStudioClient(copilotSettings, token);
-      let conversationId = '';
-      for await (const activity of client.startConversationStreaming({ emitStartConversationEvent: false, locale: 'fr-FR' })) {
-        conversationId = activity.conversation?.id || conversationId;
-      }
-      if (!conversationId) throw new Error('Impossible de démarrer une conversation Copilot.');
-      const instruction = mode === 'mep-start'
-        ? 'Rédige un email professionnel de DÉBUT DE MEP destiné aux équipes projet et production. Mentionne uniquement les informations fournies : périmètre, date/créneau si disponible, Change, RITM, intervenants, prérequis, déroulé, GO/NO-GO, risques et rollback. N’invente aucune information : utilise « À confirmer » si une donnée manque.'
-        : mode === 'mep-end'
-          ? 'Rédige un email professionnel de FIN DE MEP. Indique le résultat réel, les contrôles/tests, le retour au nominal, les incidents, réserves et actions restantes. N’annonce jamais un succès si le statut ne le confirme pas. N’invente rien ; marque les éléments absents « À confirmer ».'
-          : 'Rédige un compte rendu COPROJ professionnel, fidèle aux notes/transcription fournies. Structure : objet/date si connus, participants si cités, synthèse, sujets abordés, décisions, actions (responsable et échéance uniquement si indiqués), risques/alertes, points à arbitrer et prochaines étapes. Distingue clairement les faits, décisions et points à confirmer. N’invente aucun participant, décision, responsable ou délai.';
-      const prompt = `Tu es l'assistant de communication d'un chef de projet production. Réponds en français professionnel, clair, synthétique et prêt à relire. ${instruction}
-Retourne exclusivement un JSON valide de la forme {"subject":"...","body":"..."} ; body en texte brut avec des paragraphes et listes utilisant des retours à la ligne.
-DONNÉES STRUCTURÉES :
-${JSON.stringify(buildContext(), null, 2)}`;
-      const activity = { type: 'message', text: prompt, conversation: { id: conversationId } } as any;
-      const replies: string[] = [];
-      for await (const reply of client.sendActivityStreaming(activity)) {
-        if (reply.type === 'message' && reply.text) replies.push(reply.text);
-      }
-      const raw = replies.join('\n').trim();
-      if (!raw) throw new Error('Copilot n’a retourné aucun contenu. Vérifiez les instructions de votre agent.');
-      let parsed: DraftContent;
-      try {
-        const cleaned = raw.replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/, '');
-        const json = JSON.parse(cleaned);
-        parsed = { subject: String(json.subject || ''), body: String(json.body || '') };
-      } catch {
-        const lines = raw.split('\n');
-        parsed = { subject: lines[0].replace(/^#+\s*/, '').slice(0, 180), body: raw };
-      }
-      setDraft(parsed);
-      setMessage('Brouillon généré. Relisez et corrigez le contenu avant toute création Outlook.');
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'La transcription a échoué.');
+      const text = String(result.transcript || '').trim();
+      if (!text) throw new Error('Whisper n’a détecté aucune parole exploitable.');
+      setTranscript(text);
+      setMessage('Transcription terminée. Préparation du compte rendu et du brouillon d’e-mail…');
+      await generateDraft('coproj', text);
+      setMessage('Transcription et brouillon COPROJ générés. Relisez et corrigez le contenu avant de l’utiliser.');
+      setNotice('success');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'La génération Copilot a échoué.');
+      setMessage(error instanceof Error ? error.message : 'Erreur pendant la transcription.');
+      setNotice('warning');
     } finally { setBusy(false); }
   };
 
-  const openOutlookClient = () => {
-    if (!draft.subject.trim() || !draft.body.trim()) {
-      setMessage('Le sujet et le contenu du mail sont obligatoires.');
-      return;
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setMessage('La capture audio nécessite un navigateur récent (Edge ou Chrome) et une connexion HTTPS.');
+      setNotice('warning'); return;
     }
-    const recipients = recipientText
-      .split(/[;,\n]/)
-      .map((email) => email.trim())
-      .filter(Boolean)
-      .map((email) => encodeURIComponent(email))
-      .join(',');
-    const params = new URLSearchParams({
-      subject: draft.subject,
-      body: draft.body,
-    });
-    const mailto = `mailto:${recipients}?${params.toString()}`;
-    setMessage('Ouverture du client de messagerie… Vérifiez le brouillon dans Outlook avant tout envoi.');
-    window.location.href = mailto;
+    try {
+      setMessage('Sélectionnez l’écran Teams et cochez « Partager l’audio du système ».');
+      setNotice('info');
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      displayStreamRef.current = display;
+      const systemTracks = display.getAudioTracks();
+      if (!systemTracks.length) {
+        display.getTracks().forEach((track) => track.stop());
+        displayStreamRef.current = null;
+        throw new Error('Aucun audio système reçu. Relancez le partage et cochez « Partager l’audio du système ».');
+      }
+
+      let recordingStream = new MediaStream(systemTracks);
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStreamRef.current = mic;
+        const context = new AudioContext();
+        audioContextRef.current = context;
+        const destination = context.createMediaStreamDestination();
+        context.createMediaStreamSource(new MediaStream(systemTracks)).connect(destination);
+        context.createMediaStreamSource(mic).connect(destination);
+        recordingStream = destination.stream;
+      } catch {
+        setMessage('Microphone non autorisé : seuls les sons reçus de Teams seront capturés.');
+      }
+
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onerror = () => { setMessage('Erreur de capture audio. Arrêtez puis relancez la capture.'); setNotice('warning'); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        displayStreamRef.current?.getTracks().forEach((track) => track.stop());
+        micStreamRef.current?.getTracks().forEach((track) => track.stop());
+        displayStreamRef.current = null; micStreamRef.current = null;
+        void audioContextRef.current?.close(); audioContextRef.current = null;
+        void uploadRecording(blob);
+      };
+      recorderRef.current = recorder;
+      recorder.start(1000);
+      startedAtRef.current = Date.now();
+      setElapsed(0); setRecording(true);
+      setMessage('Clarity écoute la réunion. Les données audio restent sur le VPS pour la transcription Whisper.');
+      setNotice('success');
+      display.getVideoTracks()[0]?.addEventListener('ended', () => {
+        if (recorder.state !== 'inactive') recorder.stop();
+        setRecording(false);
+      });
+    } catch (error) {
+      displayStreamRef.current?.getTracks().forEach((track) => track.stop());
+      displayStreamRef.current = null;
+      setMessage(error instanceof Error ? error.message : 'Impossible de démarrer la capture audio.');
+      setNotice('warning');
+    }
+  };
+
+  const stopRecording = () => {
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    setRecording(false);
+  };
+
+  const generateMepEmail = async () => {
+    setBusy(true); setMessage('Préparation du mail par le serveur Clarity…'); setNotice('info');
+    try {
+      await generateDraft(mode);
+      setMessage('Brouillon généré. Relisez et corrigez le contenu avant ouverture dans Outlook.');
+      setNotice('success');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Génération impossible.');
+      setNotice('warning');
+    } finally { setBusy(false); }
+  };
+
+  const openOutlook = () => {
+    if (!draft.subject.trim() || !draft.body.trim()) { setMessage('Le sujet et le contenu du mail sont obligatoires.'); setNotice('warning'); return; }
+    const recipients = recipientText.split(/[;,\n]/).map((email) => email.trim()).filter(Boolean).map(encodeURIComponent).join(',');
+    const params = new URLSearchParams({ subject: draft.subject, body: draft.body });
+    window.location.href = `mailto:${recipients}?${params.toString()}`;
+    setMessage('Outlook a été sollicité. Vérifiez le message dans les Brouillons ou la fenêtre de composition avant tout envoi.');
+    setNotice('info');
   };
 
   const copyDraft = async () => {
     await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
-    setMessage('Sujet et contenu copiés.');
+    setMessage('Sujet et compte rendu copiés.'); setNotice('success');
   };
+  const copyTranscript = async () => {
+    await navigator.clipboard.writeText(transcript);
+    setMessage('Transcription copiée.'); setNotice('success');
+  };
+  const formatTime = (seconds: number) => `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 
   return (
     <section className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
-      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-indigo-700"><Sparkles className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Clarity AI · Communication</span></div>
-          <h3 className="text-lg font-black text-slate-900 mt-1">Mails MEP & comptes rendus COPROJ</h3>
-          <p className="text-xs text-slate-500 mt-1">Génération avec votre agent Copilot Studio, puis ouverture du client Outlook après relecture.</p>
-        </div>
-        <span className={`px-3 py-1 rounded-full border text-[11px] font-bold ${connected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>{connected ? 'Copilot connecté' : 'Connexion Copilot requise'}</span>
+      <div>
+        <div className="flex items-center gap-2 text-indigo-700"><Sparkles className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Clarity · Communication production</span></div>
+        <h3 className="text-lg font-black text-slate-900 mt-1">Mails MEP & transcription des réunions</h3>
+        <p className="text-xs text-slate-500 mt-1">Transcription locale au VPS avec Whisper. Aucun Copilot Studio, Microsoft Graph ou accès à votre boîte Outlook.</p>
       </div>
 
-      <div className="rounded-xl bg-sky-50 border border-sky-100 p-3 text-xs text-sky-900">
-        La connexion Microsoft sert uniquement à dialoguer avec votre agent Copilot Studio. Outlook est ouvert localement via le protocole mailto du poste : aucune API Outlook, aucun accès à la boîte mail et aucun envoi automatique.
-      </div>
-
-      <div className="border border-slate-200 rounded-xl p-4 space-y-3">
-        <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><Settings2 className="w-4 h-4" /> Configuration Copilot Studio / Microsoft Entra</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {([
-            ['tenantId', 'Tenant ID'],
-            ['appClientId', 'Application (Client) ID'],
-            ['environmentId', 'Copilot Studio Environment ID'],
-            ['schemaName', 'Agent Schema name'],
-          ] as const).map(([key, label]) => (
-            <label key={key} className="text-[11px] font-bold text-slate-600 space-y-1">
-              {label}
-              <input value={settings[key]} onChange={(e) => { setSettings((s) => ({ ...s, [key]: e.target.value })); setMsal(null); setConnected(false); }} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800" placeholder={key === 'schemaName' ? 'cr299_clarity_tB6p_X' : 'À renseigner'} />
-            </label>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={saveSettings} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-2"><Save className="w-3.5 h-3.5" /> Enregistrer la configuration</button>
-          <button onClick={connectCopilot} disabled={busy} className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Se connecter à Copilot</button>
-        </div>
-        <p className="text-[11px] text-slate-500">Dans Entra ID, ajoutez uniquement l’autorisation déléguée Power Platform API → CopilotStudio.Copilots.Invoke. Configurez l’URL de redirection SPA sur l’URL de Clarity et accordez le consentement demandé par votre organisation. Aucune permission Microsoft Graph n’est requise.</p>
+      <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-950 space-y-1">
+        <b>Avant de démarrer une réunion Teams Desktop</b>
+        <p>Utilisez Clarity dans Edge ou Chrome (HTTPS). Dans le sélecteur de partage, choisissez l’écran qui affiche Teams et activez « Partager l’audio du système ». Autorisez aussi le microphone si vous souhaitez inclure votre propre voix. Informez les participants et respectez les règles internes d’enregistrement.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <label className="text-xs font-bold text-slate-700 space-y-1">Document à générer
-          <select value={mode} onChange={(e) => { setMode(e.target.value as CommunicationMode); setDraft({ subject: '', body: '' });  }} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">
+        <label className="text-xs font-bold text-slate-700 space-y-1">Document à préparer
+          <select value={mode} onChange={(e) => { setMode(e.target.value as CommunicationMode); setDraft({ subject: '', body: '' }); }} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">
             <option value="mep-start">Mail de début de MEP</option>
             <option value="mep-end">Mail de fin de MEP</option>
-            <option value="coproj">Compte rendu COPROJ (notes)</option>
+            <option value="coproj">Transcription + CR COPROJ</option>
           </select>
         </label>
         {mode === 'coproj' ? (
@@ -290,41 +239,53 @@ ${JSON.stringify(buildContext(), null, 2)}`;
         )}
       </div>
 
-      {mode === 'coproj' && <label className="block text-xs font-bold text-slate-700 space-y-1">Notes ou transcription de la réunion
-        <textarea rows={7} value={meetingNotes} onChange={(e) => setMeetingNotes(e.target.value)} placeholder="Collez ici vos notes, décisions, échanges et actions du COPROJ…" className="w-full border border-slate-300 rounded-xl p-3 text-sm font-normal" />
-      </label>}
+      {mode === 'coproj' ? (
+        <div className="border border-indigo-200 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><Mic className="w-4 h-4 text-indigo-600" /> Enregistrement Teams Desktop</div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={startRecording} disabled={recording || busy} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><MonitorUp className="w-4 h-4" /> Démarrer l’écoute</button>
+            <button onClick={stopRecording} disabled={!recording} className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2"><Square className="w-3.5 h-3.5" /> Arrêter et transcrire</button>
+            {recording && <span className="inline-flex items-center gap-2 text-sm font-bold text-rose-700"><span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" /> {formatTime(elapsed)}</span>}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-slate-500"><AudioLines className="w-4 h-4" /> Capture en cours dans le navigateur ; transcription effectuée sur le serveur après l’arrêt.</div>
+          {busy && <div className="flex items-center gap-2 text-xs text-indigo-700"><Loader2 className="w-4 h-4 animate-spin" /> {message}</div>}
+        </div>
+      ) : (
+        <>
+          {selectedMep && <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">Référence</div><b>{selectedMep.ref || selectedMep.id}</b></div>
+            <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">Date MEP</div><b>{asText(selectedMep.date)}</b></div>
+            <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">Change</div><b>{asText(selectedMep.changeNumbers)}</b></div>
+            <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">RITM</div><b>{asText(selectedMep.ritmNumbers)}</b></div>
+          </div>}
+          <button onClick={generateMepEmail} disabled={busy} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Sparkles className="w-4 h-4" /> {busy ? 'Traitement…' : 'Générer le mail MEP'}</button>
+        </>
+      )}
 
-      {mode !== 'coproj' && selectedMep && <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-        <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">Référence</div><b>{selectedMep.ref || selectedMep.id}</b></div>
-        <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">Date MEP</div><b>{asText(selectedMep.date)}</b></div>
-        <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">Change</div><b>{asText(selectedMep.changeNumbers)}</b></div>
-        <div className="bg-slate-50 rounded-lg p-3"><div className="text-slate-500">RITM</div><b>{asText(selectedMep.ritmNumbers)}</b></div>
+      {mode === 'coproj' && transcript && <div className="space-y-2">
+        <div className="flex items-center justify-between"><label className="text-xs font-bold text-slate-700">Transcription complète (modifiable)</label><button onClick={copyTranscript} className="text-xs font-bold text-indigo-700 flex items-center gap-1"><Copy className="w-3.5 h-3.5" /> Copier</button></div>
+        <textarea rows={9} value={transcript} onChange={(e) => setTranscript(e.target.value)} className="w-full border border-slate-300 rounded-xl p-3 text-sm font-normal leading-relaxed" />
+        <button onClick={async () => { setBusy(true); try { await generateDraft('coproj', transcript); setMessage('Compte rendu régénéré à partir de la transcription modifiée.'); setNotice('success'); } catch (e) { setMessage(e instanceof Error ? e.message : 'Génération impossible.'); setNotice('warning'); } finally { setBusy(false); } }} disabled={busy} className="px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-bold">Régénérer le CR depuis la transcription</button>
       </div>}
-
-      <div className="flex flex-wrap gap-2">
-        <button onClick={generate} disabled={busy} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Sparkles className="w-4 h-4" />{busy ? 'Traitement…' : 'Générer avec Copilot'}</button>
-        {busy && <Loader2 className="w-5 h-5 animate-spin text-indigo-600 self-center" />}
-      </div>
 
       {(draft.subject || draft.body) && <div className="border border-indigo-100 bg-indigo-50/30 rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><FileText className="w-4 h-4" /> Brouillon à relire et modifier</div>
-        {mode !== 'coproj' && <label className="block text-xs font-bold text-slate-700 space-y-1">Destinataires (facultatif, séparés par ; ou ,)
+        <label className="block text-xs font-bold text-slate-700 space-y-1">Destinataires (facultatif, séparés par ; ou ,)
           <input value={recipientText} onChange={(e) => setRecipientText(e.target.value)} placeholder="equipe@entreprise.fr; production@entreprise.fr" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
-        </label>}
-        <label className="block text-xs font-bold text-slate-700 space-y-1">Objet / titre
+        </label>
+        <label className="block text-xs font-bold text-slate-700 space-y-1">Objet
           <input value={draft.subject} onChange={(e) => setDraft((d) => ({ ...d, subject: e.target.value }))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
         </label>
-        <label className="block text-xs font-bold text-slate-700 space-y-1">Contenu
+        <label className="block text-xs font-bold text-slate-700 space-y-1">Compte rendu / contenu du mail
           <textarea rows={mode === 'coproj' ? 16 : 12} value={draft.body} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} className="w-full border border-slate-300 rounded-lg p-3 text-sm font-normal leading-relaxed" />
         </label>
         <div className="flex flex-wrap gap-2">
           <button onClick={copyDraft} className="px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Copier</button>
-          {mode !== 'coproj' && <button onClick={openOutlookClient} disabled={busy} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Ouvrir dans Outlook</button>}
+          <button onClick={openOutlook} disabled={busy} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Ouvrir le brouillon dans Outlook</button>
         </div>
-        
       </div>}
 
-      {message && <p role="status" className="text-xs text-slate-600 bg-slate-50 rounded-lg p-3">{message}</p>}
+      {message && <p role="status" className={`text-xs rounded-lg p-3 flex items-start gap-2 ${notice === 'success' ? 'bg-emerald-50 text-emerald-800' : notice === 'warning' ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{notice === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : notice === 'warning' ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <Loader2 className={`w-4 h-4 shrink-0 ${busy ? 'animate-spin' : ''}`} />}{message}</p>}
     </section>
   );
 };
