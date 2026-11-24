@@ -117,6 +117,9 @@ export interface MepRunbookRecipient {
   end: boolean;
   teams: boolean;
   pss: boolean;
+  coproj: boolean;
+  to: boolean;
+  cc: boolean;
 }
 export interface MepRunbookEvent {
   id: string;
@@ -309,7 +312,7 @@ const normalizeRunbook = (value: any, owner = ''): MepRunbook => {
     dag: step(value.dag, 'Mise à jour du DAG'),
     rollbackEnabled: Boolean(value.rollbackEnabled), rollbackTriggered: Boolean(value.rollbackTriggered),
     rollbackSteps: Array.isArray(value.rollbackSteps) ? value.rollbackSteps.map((x: any) => step(x, 'Étape de rollback')) : base.rollbackSteps,
-    recipients: Array.isArray(value.recipients) ? value.recipients.map((x: any) => ({ id: x.id || uid('REC'), name: String(x.name || ''), email: String(x.email || ''), information: Boolean(x.information), sondes: Boolean(x.sondes), start: Boolean(x.start), end: Boolean(x.end), teams: Boolean(x.teams), pss: Boolean(x.pss) })) : [],
+    recipients: Array.isArray(value.recipients) ? value.recipients.map((x: any) => ({ id: x.id || uid('REC'), name: String(x.name || ''), email: String(x.email || ''), information: Boolean(x.information), sondes: Boolean(x.sondes), start: Boolean(x.start), end: Boolean(x.end), teams: Boolean(x.teams), pss: Boolean(x.pss), coproj: Boolean(x.coproj), to: x.to !== false, cc: Boolean(x.cc) })) : [],
     events: Array.isArray(value.events) ? value.events.slice(-100) : [],
   };
 };
@@ -678,6 +681,40 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     const events = [...selectedRunbook.events, { id: uid('EVT'), type: action, stepId: step.id, stepTitle: step.title, actor: currentUser.displayName, at: now.toISOString() }].slice(-100);
     if (collection === 'dag') saveRunbook({ dag: changed, events });
     else saveRunbook({ [collection]: (selectedRunbook[collection] as MepExecutionStep[]).map((x) => x.id === step.id ? changed : x), events } as Partial<MepRunbook>);
+  };
+
+  const cloneMep = (source: MepEntry) => {
+    const now = new Date().toISOString();
+    const sourceRunbook = normalizeRunbook(source.runbook, source.owner);
+    const clonedRunbook: MepRunbook = {
+      ...sourceRunbook,
+      prerequisites: sourceRunbook.prerequisites.map((item) => ({ ...item, id: uid('PRE'), status: 'À faire', startAt: '', endAt: '' })),
+      executionSteps: sourceRunbook.executionSteps.map((step) => ({ ...step, id: uid('STEP'), status: 'À faire', startTime: '', endTime: '' })),
+      dag: { ...sourceRunbook.dag, id: uid('STEP'), status: 'À faire', startTime: '', endTime: '' },
+      rollbackTriggered: false,
+      rollbackSteps: sourceRunbook.rollbackSteps.map((step) => ({ ...step, id: uid('STEP'), status: 'À faire', startTime: '', endTime: '' })),
+      events: [],
+      recipients: sourceRunbook.recipients.map((recipient) => ({ ...recipient, id: uid('REC') })),
+    };
+    const cloned: MepEntry = {
+      ...source,
+      id: uid('MEP'),
+      ref: '',
+      title: source.title ? source.title + ' - Copie' : 'Copie de MEP',
+      date: `${isoToday()}T22:00`,
+      status: 'Brouillon',
+      goNoGo: 'En attente',
+      changeNumbers: '',
+      ritmNumbers: '',
+      tasks: (source.tasks || []).map((task) => ({ ...task, id: uid('TASK'), status: 'À faire', projectTaskId: undefined, projectMilestoneId: undefined })),
+      minutes: [],
+      runbook: clonedRunbook,
+      createdAt: now,
+      updatedAt: now,
+    };
+    persistDb({ ...db, mep: [cloned, ...db.mep] });
+    setPage('mep');
+    showToast('MEP clonée : tâches, chronogramme et destinataires conservés. Change, RITM et exécution réinitialisés.');
   };
 
   // MEP Modal handlers
@@ -1660,6 +1697,13 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                               <Play className="w-3 h-3" /> Pilotage
                             </button>
                             <button
+                              onClick={() => cloneMep(x)}
+                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 cursor-pointer"
+                              title="Cloner cette MEP (conserver le modèle, réinitialiser l'exécution)"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                            <button
                               onClick={() => openMepForm(x.id)}
                               className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 cursor-pointer"
                               title="Modifier"
@@ -1736,7 +1780,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3"><div><h4 className="text-sm font-black text-slate-900">Destinataires des communications</h4><p className="text-xs text-slate-500">À / Cc pour les mails et participants Teams. Les coordonnées restent propres à cette MEP.</p></div><button onClick={()=>saveRunbook({recipients:[...selectedRunbook.recipients,{id:uid('REC'),name:'',email:'',information:false,sondes:false,start:false,end:false,teams:false,pss:false}]})} className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold">+ Ajouter</button></div>
-                    <div className="overflow-x-auto"><table className="w-full text-xs min-w-[900px]"><thead><tr className="text-left text-[10px] uppercase text-slate-500 border-b"><th className="p-2">Nom</th><th className="p-2">E-mail</th>{[['information','Info'],['sondes','Sondes'],['start','Début'],['end','Fin'],['teams','Teams'],['pss','PSS / PSC']].map(([k,l])=><th key={k} className="p-2 text-center">{l}</th>)}<th /></tr></thead><tbody>{selectedRunbook.recipients.map(r=><tr key={r.id} className="border-b border-slate-100"><td className="p-1"><input value={r.name} onChange={e=>updateRunbookCollection('recipients',r.id,{name:e.target.value})} className="w-36 p-2 border rounded" /></td><td className="p-1"><input type="email" value={r.email} onChange={e=>updateRunbookCollection('recipients',r.id,{email:e.target.value})} className="w-56 p-2 border rounded" /></td>{(['information','sondes','start','end','teams','pss'] as const).map(k=><td key={k} className="p-2 text-center"><input type="checkbox" checked={r[k]} onChange={e=>updateRunbookCollection('recipients',r.id,{[k]:e.target.checked})} /></td>)}<td><button onClick={()=>saveRunbook({recipients:selectedRunbook.recipients.filter(x=>x.id!==r.id)})} className="text-rose-600 p-2"><X className="w-4 h-4"/></button></td></tr>)}</tbody></table></div>
+                    <div className="overflow-x-auto"><table className="w-full text-xs min-w-[1120px]"><thead><tr className="text-left text-[10px] uppercase text-slate-500 border-b"><th className="p-2">Nom</th><th className="p-2">E-mail</th>{[['to','À'],['cc','Cc'],['information','Info'],['sondes','Sondes'],['start','Début'],['end','Fin'],['teams','Teams'],['coproj','COPROJ'],['pss','PSS / PSC']].map(([k,l])=><th key={k} className="p-2 text-center">{l}</th>)}<th /></tr></thead><tbody>{selectedRunbook.recipients.map(r=><tr key={r.id} className="border-b border-slate-100"><td className="p-1"><input value={r.name} onChange={e=>updateRunbookCollection('recipients',r.id,{name:e.target.value})} className="w-36 p-2 border rounded" /></td><td className="p-1"><input type="email" value={r.email} onChange={e=>updateRunbookCollection('recipients',r.id,{email:e.target.value})} className="w-56 p-2 border rounded" /></td>{(['to','cc','information','sondes','start','end','teams','coproj','pss'] as const).map(k=><td key={k} className="p-2 text-center"><input aria-label={k} type="checkbox" checked={r[k]} onChange={e=>updateRunbookCollection('recipients',r.id,{[k]:e.target.checked})} /></td>)}<td><button onClick={()=>saveRunbook({recipients:selectedRunbook.recipients.filter(x=>x.id!==r.id)})} className="text-rose-600 p-2"><X className="w-4 h-4"/></button></td></tr>)}</tbody></table></div>
                   </div>
                 </div>
               )}
