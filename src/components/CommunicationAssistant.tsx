@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
-import { Activity } from '@microsoft/agents-activity';
 import { CopilotStudioClient } from '@microsoft/agents-copilotstudio-client';
 import { Copy, Mail, FileText, Sparkles, Save, Settings2, Loader2, ExternalLink } from 'lucide-react';
 import { Project } from '../types';
@@ -91,14 +90,15 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const connectCopilot = async () => {
     setBusy(true); setMessage('');
     try {
-      const token = await acquireMicrosoftToken(['https://api.powerplatform.com/.default']);
-      const client = new CopilotStudioClient({
+      const copilotSettings = {
         environmentId: settings.environmentId.trim(),
         schemaName: settings.schemaName.trim(),
         tenantId: settings.tenantId.trim(),
         appClientId: settings.appClientId.trim(),
         authority: 'https://login.microsoftonline.com',
-      } as any, token);
+      } as any;
+      const token = await acquireMicrosoftToken([CopilotStudioClient.scopeFromSettings(copilotSettings)]);
+      const client = new CopilotStudioClient(copilotSettings, token);
       const start = client.startConversationStreaming({ emitStartConversationEvent: false, locale: 'fr-FR' });
       let conversationId = '';
       for await (const activity of start) conversationId = activity.conversation?.id || conversationId;
@@ -157,14 +157,15 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     }
     setBusy(true); setMessage('Génération avec Copilot Studio…'); setSavedDraftId('');
     try {
-      const token = await acquireMicrosoftToken(['https://api.powerplatform.com/.default']);
-      const client = new CopilotStudioClient({
+      const copilotSettings = {
         environmentId: settings.environmentId.trim(),
         schemaName: settings.schemaName.trim(),
         tenantId: settings.tenantId.trim(),
         appClientId: settings.appClientId.trim(),
         authority: 'https://login.microsoftonline.com',
-      } as any, token);
+      } as any;
+      const token = await acquireMicrosoftToken([CopilotStudioClient.scopeFromSettings(copilotSettings)]);
+      const client = new CopilotStudioClient(copilotSettings, token);
       let conversationId = '';
       for await (const activity of client.startConversationStreaming({ emitStartConversationEvent: false, locale: 'fr-FR' })) {
         conversationId = activity.conversation?.id || conversationId;
@@ -179,9 +180,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
 Retourne exclusivement un JSON valide de la forme {"subject":"...","body":"..."} ; body en texte brut avec des paragraphes et listes utilisant des retours à la ligne.
 DONNÉES STRUCTURÉES :
 ${JSON.stringify(buildContext(), null, 2)}`;
-      const activity = new Activity('message');
-      activity.text = prompt;
-      activity.conversation = { id: conversationId };
+      const activity = { type: 'message', text: prompt, conversation: { id: conversationId } } as any;
       const replies: string[] = [];
       for await (const reply of client.sendActivityStreaming(activity)) {
         if (reply.type === 'message' && reply.text) replies.push(reply.text);
