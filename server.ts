@@ -249,9 +249,10 @@ app.use('/api', async (req: Request, res: Response, next) => {
     const role=u.role as UserRole; const method=req.method.toUpperCase(); const route=req.path;
     const write=['POST','PUT','PATCH','DELETE'].includes(method);
     if ((route.startsWith('/users') || route.startsWith('/admin') || route === '/schema/sql' || route === '/audit-logs') && role !== 'ADMINISTRATEUR') return res.status(403).json({error:'Accès administrateur requis.'});
+    if (route.startsWith('/project-managers') && !['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(role)) return res.status(403).json({error:'Seul le Directeur de Projets peut gérer les chefs de projet.'});
     if ((route === '/projects' && method === 'POST' || /^\/projects\/[^/]+$/.test(route) && method === 'DELETE') && !RBAC.canCreateOrDeleteProject(role)) return res.status(403).json({error:'Droits insuffisants pour cette opération.'});
     if (route === '/workspace' && method === 'PUT' && role === 'CONTRIBUTEUR') return res.status(403).json({error:'Les contributeurs ne peuvent pas remplacer le portefeuille complet.'});
-    if (route === '/scopes' && write && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les trigrammes du périmètre.'});
+    if (route === '/scopes' && write && !['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les trigrammes du périmètre.'});
     if (/^\/projects\/[^/]+$/.test(route) && method === 'PUT' && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','PMO'].includes(role)) return res.status(403).json({error:'Droits insuffisants pour modifier ce projet.'});
     if (/^\/projects\/[^/]+\/team/.test(route) && write && !RBAC.canManageResources(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les ressources.'});
     if (/^\/projects\/[^/]+\/tasks/.test(route) && write && !RBAC.canManageTasks(role)) return res.status(403).json({error:'Droits insuffisants pour gérer les tâches.'});
@@ -284,23 +285,7 @@ app.put('/api/scopes', async (req: Request, res: Response) => {
   }
   const normalizedScopes = scopes.map((s: any) => ({ ...s, code: s.code.trim().toUpperCase(), trigrams: Array.from(new Set(s.trigrams.map((t: string) => t.trim().toUpperCase()))) }));
   const actor = getUserFromRequest(req);
-  if (actor.role === 'CHEF_PROJET') {
-    const current = await getPgPool()!.query('SELECT scopes FROM portfolio_scope_state WHERE id=1');
-    const previousScopes: any[] = current.rows[0]?.scopes || [];
-    if (previousScopes.length !== normalizedScopes.length || previousScopes.some((oldScope: any) => {
-      const next = normalizedScopes.find((item: any) => item.id === oldScope.id);
-      return !next || next.code !== oldScope.code || next.name !== oldScope.name || (next.description || '') !== (oldScope.description || '');
-    })) return res.status(403).json({ error: 'Le Chef de Projet peut gérer les trigrammes, mais pas créer, supprimer ou renommer les périmètres.' });
-    const workspace = await getPgPool()!.query('SELECT projects FROM workspace_state WHERE id=1');
-    const assignedProjects: any[] = workspace.rows[0]?.projects || [];
-    for (const project of assignedProjects) {
-      const scope = normalizedScopes.find((item: any) => item.id === project.scopeId);
-      const previousScope = previousScopes.find((item: any) => item.id === project.scopeId);
-      const removed = (project.trigrams || []).filter((trigram: string) => !(scope?.trigrams || []).includes(String(trigram).toUpperCase()));
-      if (removed.length) return res.status(409).json({ error: 'Impossible de supprimer un trigramme encore rattaché à un projet. Réaffectez d’abord les projets concernés.' });
-      if (!scope && previousScope) return res.status(409).json({ error: 'Un périmètre utilisé ne peut pas être supprimé.' });
-    }
-  }
+  if (!['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(actor.role || '')) return res.status(403).json({ error: 'Seul le Directeur de Projets peut modifier le référentiel partagé des trigrammes.' });
   const result = await getPgPool()!.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(normalizedScopes), revision]);
   if (!result.rowCount) return res.status(409).json({ error: 'Les périmètres ont été modifiés par un autre utilisateur. Rechargez la page.' });
   res.json({ success: true, revision: Number(result.rows[0].revision), updatedAt: result.rows[0].updated_at });
@@ -364,33 +349,29 @@ app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
 });
 
 // Shared workspace snapshot: PostgreSQL is the source of truth for the SPA's project portfolio.
-app.get('/api/workspace', async (_req: Request,res: Response) => {
-  const pool=getPgPool()!;
-  let r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');
-  if(!r.rowCount){
-    await pool.query('INSERT INTO workspace_state(id,projects,revision) VALUES(1,$1::jsonb,1) ON CONFLICT(id) DO NOTHING',[JSON.stringify(dbStore.getAllProjects())]);
-    r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');
-  }
-  res.json({success:true,projects:r.rows[0].projects,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
+app.get('/api/workspace', async (req: Request,res: Response) => {
+  const pool=getPgPool()!; let r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');
+  if(!r.rowCount){await pool.query('INSERT INTO workspace_state(id,projects,revision) VALUES(1,$1::jsonb,1) ON CONFLICT(id) DO NOTHING',[JSON.stringify(dbStore.getAllProjects())]);r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');}
+  const actor=getUserFromRequest(req);const all:any[]=r.rows[0].projects||[];const visible=actor.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===actor.id):all;
+  res.json({success:true,projects:visible,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
 });
 app.put('/api/workspace', async (req: Request,res: Response) => {
-  const projects=req.body?.projects; const revision=Number(req.body?.revision);
-  if(!Array.isArray(projects) || projects.length>500 || !Number.isSafeInteger(revision) || revision<1 || projects.some((p:any)=>!p || typeof p!=='object' || typeof p.id!=='string' || typeof p.name!=='string' || p.id.length>128 || p.name.length>300)) return res.status(400).json({error:'Données de portefeuille invalides.'});
-  const pool=getPgPool()!;
-  const retainedIds = new Set<string>(projects.map((p:any) => String(p.id)));
-  const currentWorkspace = await pool.query('SELECT projects FROM workspace_state WHERE id=1');
-  const currentProjects: any[] = currentWorkspace.rows[0]?.projects || [];
-  const removedProjects = currentProjects.filter((p: any) => !retainedIds.has(String(p.id)));
-  if (removedProjects.length && !RBAC.canCreateOrDeleteProject(getUserFromRequest(req).role || 'CONTRIBUTEUR')) {
-    return res.status(403).json({ error: 'Seuls le Directeur de Projets ou l’Administrateur peuvent supprimer un projet.' });
+  const submitted=req.body?.projects;const revision=Number(req.body?.revision);const actor=getUserFromRequest(req);
+  if(!Array.isArray(submitted)||submitted.length>500||!Number.isSafeInteger(revision)||revision<1||submitted.some((p:any)=>!p||typeof p!=='object'||typeof p.id!=='string'||typeof p.name!=='string'||p.id.length>128||p.name.length>300))return res.status(400).json({error:'Données de portefeuille invalides.'});
+  const pool=getPgPool()!;const current=await pool.query('SELECT projects FROM workspace_state WHERE id=1');const all:any[]=current.rows[0]?.projects||[];let next:any[];
+  if(actor.role==='CHEF_PROJET'){
+    const owned=all.filter((p:any)=>p.managerId===actor.id);const submittedIds=new Set(submitted.map((p:any)=>String(p.id)));
+    if(submitted.some((p:any)=>{const old=all.find((x:any)=>x.id===p.id);return (old&&old.managerId!==actor.id)||(p.managerId&&p.managerId!==actor.id);}))return res.status(403).json({error:'Vous ne pouvez modifier que les projets qui vous sont attribués.'});
+    const removed=owned.filter((p:any)=>!submittedIds.has(String(p.id)));const mr=await pool.query('SELECT meps FROM mep_workspace_state WHERE id=1');const meps:any[]=mr.rows[0]?.meps||[];
+    const blocked=meps.filter((m:any)=>removed.some((p:any)=>p.id===m.projectId));if(blocked.length)return res.status(409).json({error:`Suppression refusée : ${blocked.length} MEP sont encore rattachées à un projet.`});
+    next=[...all.filter((p:any)=>p.managerId!==actor.id),...submitted.map((p:any)=>({...p,managerId:actor.id,managerName:actor.displayName}))];
+  }else{
+    const ids=new Set(submitted.map((p:any)=>String(p.id)));const removed=all.filter((p:any)=>!ids.has(String(p.id)));const mr=await pool.query('SELECT meps FROM mep_workspace_state WHERE id=1');const meps:any[]=mr.rows[0]?.meps||[];
+    const blocked=meps.filter((m:any)=>removed.some((p:any)=>p.id===m.projectId));if(blocked.length)return res.status(409).json({error:`Suppression refusée : ${blocked.length} MEP sont encore rattachées à un projet. Réaffectez-les avant de supprimer ce projet.`});next=submitted;
   }
-  const mepResult = await pool.query('SELECT meps FROM mep_workspace_state WHERE id=1');
-  const linkedMeps: any[] = mepResult.rows[0]?.meps || [];
-  const orphaned = linkedMeps.filter((m:any) => !retainedIds.has(String(m.projectId)));
-  if (orphaned.length) return res.status(409).json({error:`Suppression refusée : ${orphaned.length} MEP sont encore rattachées à un projet. Réaffectez-les avant de supprimer ce projet.`});
-  const r=await pool.query('UPDATE workspace_state SET projects=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at',[JSON.stringify(projects),revision]);
-  if(!r.rowCount) return res.status(409).json({error:'Le portefeuille a été modifié par un autre utilisateur. Rechargez les données avant de réessayer.'});
-  res.json({success:true,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
+  const saved=await pool.query('UPDATE workspace_state SET projects=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at',[JSON.stringify(next),revision]);
+  if(!saved.rowCount)return res.status(409).json({error:'Le portefeuille a été modifié par un autre utilisateur. Rechargez les données avant de réessayer.'});
+  res.json({success:true,revision:Number(saved.rows[0].revision),updatedAt:saved.rows[0].updated_at});
 });
 
 // Atomic full-workspace JSON restore: projects and every linked MEP record move together.
@@ -453,11 +434,10 @@ app.post('/api/workspace/import', async (req: Request, res: Response) => {
 });
 
 // Central MEP repository: every MEP belongs to an existing Clarity project.
-app.get('/api/meps', async (_req: Request, res: Response) => {
-  const pool = getPgPool()!;
-  const result = await pool.query('SELECT meps, revision, updated_at FROM mep_workspace_state WHERE id=1');
-  const row = result.rows[0];
-  res.json({ success: true, meps: row?.meps || [], revision: Number(row?.revision || 1), updatedAt: row?.updated_at || null });
+app.get('/api/meps', async (req: Request, res: Response) => {
+  const pool=getPgPool()!;const result=await pool.query('SELECT meps,revision,updated_at FROM mep_workspace_state WHERE id=1');const row=result.rows[0];let meps:any[]=row?.meps||[];const actor=getUserFromRequest(req);
+  if(actor.role==='CHEF_PROJET'){const w=await pool.query('SELECT projects FROM workspace_state WHERE id=1');const ids=new Set((w.rows[0]?.projects||[]).filter((p:any)=>p.managerId===actor.id).map((p:any)=>String(p.id)));meps=meps.filter((m:any)=>ids.has(String(m.projectId)));}
+  res.json({success:true,meps,revision:Number(row?.revision||1),updatedAt:row?.updated_at||null});
 });
 app.put('/api/meps', async (req: Request, res: Response) => {
   const meps = req.body?.meps;
@@ -477,13 +457,10 @@ app.put('/api/meps', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const projects = await client.query('SELECT projects FROM workspace_state WHERE id=1 FOR SHARE');
-    const projectIds = new Set<string>((projects.rows[0]?.projects || []).map((p: any) => String(p.id)));
-    if (meps.some((m: any) => !projectIds.has(m.projectId))) {
-      await client.query('ROLLBACK');
-      return res.status(422).json({ error: 'Une MEP référence un projet inexistant. Rechargez le portefeuille et réessayez.' });
-    }
-    const updated = await client.query('UPDATE mep_workspace_state SET meps=$1::jsonb, revision=revision+1, updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(meps), revision]);
+    const projects = await client.query('SELECT projects FROM workspace_state WHERE id=1 FOR SHARE');const actor=getUserFromRequest(req);const all:any[]=projects.rows[0]?.projects||[];const visible=actor.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===actor.id):all;const projectIds=new Set<string>(visible.map((p:any)=>String(p.id)));
+    if(meps.some((m:any)=>!projectIds.has(String(m.projectId)))){await client.query('ROLLBACK');return res.status(403).json({error:'Vous ne pouvez gérer les MEP que des projets qui vous sont attribués.'});}
+    const current=await client.query('SELECT meps FROM mep_workspace_state WHERE id=1 FOR UPDATE');const ownedIds=new Set(visible.map((p:any)=>String(p.id)));const nextMeps=actor.role==='CHEF_PROJET'?[...(current.rows[0]?.meps||[]).filter((m:any)=>!ownedIds.has(String(m.projectId))),...meps]:meps;
+    const updated = await client.query('UPDATE mep_workspace_state SET meps=$1::jsonb, revision=revision+1, updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(nextMeps), revision]);
     if (!updated.rowCount) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Les MEP ont été modifiées par un autre utilisateur. Rechargez les données avant de réessayer.' });
@@ -494,6 +471,21 @@ app.put('/api/meps', async (req: Request, res: Response) => {
     await client.query('ROLLBACK');
     throw error;
   } finally { client.release(); }
+});
+
+app.get('/api/project-managers', async (_req: Request,res: Response) => {
+  const r=await getPgPool()!.query("SELECT id,display_name AS \"displayName\",email,job_title AS \"jobTitle\",department,disabled FROM app_users WHERE role='CHEF_PROJET' ORDER BY display_name");
+  res.json({success:true,managers:r.rows});
+});
+app.post('/api/project-managers', async (req: Request,res: Response) => {
+  const {displayName,email,password,jobTitle,department}=req.body||{};const cleanEmail=String(email||'').trim().toLowerCase();
+  if(!String(displayName||'').trim()||!/^\\S+@\\S+\\.\\S+$/.test(cleanEmail)||String(password||'').length<12)return res.status(400).json({error:'Nom, e-mail valide et mot de passe de 12 caractères minimum requis.'});
+  try{const id=randomUUID();const r=await getPgPool()!.query('INSERT INTO app_users(id,display_name,email,password_hash,role,job_title,department) VALUES($1,$2,$3,$4,\'CHEF_PROJET\',$5,$6) RETURNING id,display_name AS "displayName",email,job_title AS "jobTitle",department,disabled',[id,String(displayName).trim(),cleanEmail,await hashPassword(String(password)),jobTitle||'Chef de Projet',department||null]);res.status(201).json({success:true,manager:r.rows[0]});}
+  catch(e:any){if(e.code==='23505')return res.status(409).json({error:'Cet e-mail existe déjà.'});throw e;}
+});
+app.put('/api/project-managers/:id', async (req: Request,res: Response) => {
+  const disabled=Boolean(req.body?.disabled);const r=await getPgPool()!.query("UPDATE app_users SET disabled=$1 WHERE id=$2 AND role='CHEF_PROJET' RETURNING id,display_name AS \"displayName\",email,job_title AS \"jobTitle\",department,disabled",[disabled,req.params.id]);
+  if(!r.rowCount)return res.status(404).json({error:'Chef de projet introuvable.'});res.json({success:true,manager:r.rows[0]});
 });
 
 // User administration is intentionally restricted to administrators and persisted in PostgreSQL.
