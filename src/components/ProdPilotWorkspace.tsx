@@ -335,6 +335,7 @@ const getTaskDates = (m: MepEntry, t: MepTask) => {
 };
 
 const getMepProgress = (m: MepEntry) => {
+  if (m.runbook) return getRunbookProgress(normalizeRunbook(m.runbook, m.owner));
   const ts = m.tasks || [];
   if (!ts.length) return 0;
   return Math.round((ts.filter((t) => t.status === 'Terminé').length / ts.length) * 100);
