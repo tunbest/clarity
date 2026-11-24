@@ -119,6 +119,7 @@ interface ProdPilotDb {
 interface ProdPilotWorkspaceProps {
   currentUser: AppUser;
   projects?: Project[];
+  activeProjectId?: string;
 }
 
 const MEP_STATUSES: MepStatus[] = [
@@ -231,6 +232,7 @@ const getStatusBadgeClasses = (status: string) => {
 export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   currentUser,
   projects: clarityProjects = [],
+  activeProjectId,
 }) => {
   const [db, setDb] = useState<ProdPilotDb>({ mep: [], kanban: [] });
   const [mepLoaded, setMepLoaded] = useState(false);
@@ -443,9 +445,10 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const matchDate =
         !mepDateFilter ||
         (mepDateFilter === 'future' ? dayStr(x.date) >= today : dayStr(x.date) < today);
-      return matchQuery && matchStatus && matchPriority && matchDate;
+      const matchProject = !activeProjectId || x.projectId === activeProjectId;
+      return matchQuery && matchStatus && matchPriority && matchDate && matchProject;
     });
-  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepDateFilter]);
+  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepDateFilter, activeProjectId]);
 
   // MEP Modal handlers
   const openMepForm = (id: string | null = null, extraTask = false) => {
@@ -463,8 +466,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       setTaskDraft(baseTasks);
     } else {
       setMepForm({
-        projectId: clarityProjects[0]?.id || '',
-        project: clarityProjects[0]?.name || '',
+        projectId: clarityProjects.find((p) => p.id === activeProjectId)?.id || clarityProjects[0]?.id || '',
+        project: clarityProjects.find((p) => p.id === activeProjectId)?.name || clarityProjects[0]?.name || '',
         title: '',
         version: '',
         date: `${isoToday()}T22:00`,
