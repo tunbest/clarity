@@ -282,7 +282,8 @@ app.put('/api/scopes', async (req: Request, res: Response) => {
     const trigramSet = new Set<string>();
     for (const raw of scope.trigrams) { const value = String(raw || '').trim().toUpperCase(); if (!value || value.length > 20 || trigramSet.has(value)) return res.status(400).json({ error: 'Trigramme vide, trop long ou dupliqué dans un périmètre.' }); trigramSet.add(value); }
   }
-  const result = await getPgPool()!.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(scopes.map((s:any)=>({...s,code:s.code.trim().toUpperCase(),trigrams:Array.from(new Set(s.trigrams.map((t:string)=>t.trim().toUpperCase())))})), revision]);
+  const normalizedScopes = scopes.map((s: any) => ({ ...s, code: s.code.trim().toUpperCase(), trigrams: Array.from(new Set(s.trigrams.map((t: string) => t.trim().toUpperCase()))) }));
+  const result = await getPgPool()!.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(normalizedScopes), revision]);
   if (!result.rowCount) return res.status(409).json({ error: 'Les périmètres ont été modifiés par un autre utilisateur. Rechargez la page.' });
   res.json({ success: true, revision: Number(result.rows[0].revision), updatedAt: result.rows[0].updated_at });
 });
