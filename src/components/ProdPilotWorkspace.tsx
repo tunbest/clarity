@@ -55,7 +55,7 @@ export type MepStatus =
   | 'Échec'
   | 'Annulée';
 
-export type MepTaskStatus = 'À faire' | 'En cours' | 'En validation' | 'Terminé';
+export type MepTaskStatus = 'À faire' | 'En cours' | 'En validation' | 'Bloqué' | 'Terminé';
 
 export interface MepPerson {
   name: string;
@@ -140,6 +140,7 @@ const KANBAN_COLUMNS: MepTaskStatus[] = [
   'À faire',
   'En cours',
   'En validation',
+  'Bloqué',
   'Terminé',
 ];
 
@@ -222,7 +223,7 @@ const getStatusBadgeClasses = (status: string) => {
   if (['Réussie', 'Terminé', 'GO'].includes(status)) {
     return 'bg-emerald-50 text-emerald-700 border-emerald-200';
   }
-  if (['Échec', 'Annulée', 'NO-GO'].includes(status)) {
+  if (['Échec', 'Annulée', 'NO-GO', 'Bloqué'].includes(status)) {
     return 'bg-rose-50 text-rose-700 border-rose-200';
   }
   if (['En cours', 'Planifiée'].includes(status)) {
@@ -267,7 +268,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
           if (projectTask) {
             const status: MepTaskStatus = projectTask.status === 'DONE' ? 'Terminé'
               : projectTask.status === 'IN_PROGRESS' ? 'En cours'
-              : projectTask.status === 'REVIEW' ? 'En validation' : 'À faire';
+              : projectTask.status === 'REVIEW' ? 'En validation'
+              : projectTask.status === 'BLOCKED' ? 'Bloqué' : 'À faire';
             const start = dayStr(projectTask.startDate) || baseDate;
             const end = dayStr(projectTask.dueDate) || start;
             const offset = Math.round((new Date(`${start}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
@@ -561,7 +563,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const dates = getTaskDates(mep, linked);
       const status = linked.status === 'Terminé' ? 'DONE'
         : linked.status === 'En cours' ? 'IN_PROGRESS'
-        : linked.status === 'En validation' ? 'REVIEW' : 'TODO';
+        : linked.status === 'En validation' ? 'REVIEW'
+        : linked.status === 'Bloqué' ? 'BLOCKED' : 'TODO';
       return {
         ...projectTask,
         status,
