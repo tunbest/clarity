@@ -42,8 +42,8 @@ const ROLE_PERMITTED_TABS: Record<UserRole, MainTab[]> = {
   ADMINISTRATEUR: ['ADMIN'],
   DIRECTEUR_PROJETS: ['PORTFOLIO', 'DASHBOARD', 'RISKS', 'TEAM'],
   PMO: ['PORTFOLIO', 'DASHBOARD', 'GANTT', 'TASKS', 'RISKS'],
-  CHEF_PROJET: ['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM'],
-  CHEF_PROJET_PROD: ['PROD_RELEASES'],
+  CHEF_PROJET: ['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'],
+  CHEF_PROJET_PROD: ['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'],
   CONTRIBUTEUR: ['CONTRIBUTOR'],
 };
 
@@ -56,7 +56,7 @@ const getDefaultTabForRole = (role?: UserRole): MainTab => {
     case 'PMO':
       return 'PORTFOLIO';
     case 'CHEF_PROJET_PROD':
-      return 'PROD_RELEASES';
+      return 'DASHBOARD';
     case 'CONTRIBUTEUR':
       return 'CONTRIBUTOR';
     case 'CHEF_PROJET':
@@ -438,12 +438,13 @@ export const App: React.FC = () => {
             currentUser={currentUser}
             onUpdateTask={handleSaveTask}
           />
-        ) : currentUser.role === 'CHEF_PROJET_PROD' ? (
-          /* Profile: CHEF_PROJET_PROD - Exclusively Pilotage MEP */
-          <ProductionReleasePortal currentUser={currentUser} projects={projects} />
         ) : (
-          /* Operational & Strategic Views for DIRECTEUR_PROJETS, PMO, and CHEF_PROJET */
+          /* Unified project and production workspace for project managers and production leads */
           <>
+            {activeTab === 'PROD_RELEASES' && activeProject && (
+              <ProductionReleasePortal currentUser={currentUser} projects={projects} activeProjectId={activeProject.id} />
+            )}
+
             {activeTab === 'PORTFOLIO' && (
               <PortfolioOverview
                 projects={projects}
