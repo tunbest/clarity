@@ -375,7 +375,7 @@ const getMepProgress = (m: MepEntry) => {
   return Math.round((ts.filter((t) => t.status === 'Terminé').length / ts.length) * 100);
 };
 
-const parseItsmNumbers = (value: unknown): string[] => Array.from(new Set(String(value || '').split(/[\\n,;\\s]+/).map((item) => item.trim().toUpperCase()).filter(Boolean)));
+const parseItsmNumbers = (value: unknown): string[] => Array.from(new Set(String(value || '').split(/[\n,;\s]+/).map((item) => item.trim().toUpperCase()).filter(Boolean)));
 
 const normalizeItsmReferences = (value: unknown, changeNumbers: string, ritmNumbers: string): MepItsmReference[] => {
   const existing = Array.isArray(value) ? value : [];
