@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import * as XLSX from 'xlsx';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { dbStore, getPgPool } from './src/db/dbClient';
@@ -24,7 +25,7 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '20mb' }));
 
 // Authenticated identity is populated only by the database-backed session middleware.
 function getUserFromRequest(req: Request): AppUser {
@@ -283,6 +284,42 @@ app.put('/api/scopes', async (req: Request, res: Response) => {
   const result = await getPgPool()!.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(scopes.map((s:any)=>({...s,code:s.code.trim().toUpperCase(),trigrams:Array.from(new Set(s.trigrams.map((t:string)=>t.trim().toUpperCase())))})), revision]);
   if (!result.rowCount) return res.status(409).json({ error: 'Les périmètres ont été modifiés par un autre utilisateur. Rechargez la page.' });
   res.json({ success: true, revision: Number(result.rows[0].revision), updatedAt: result.rows[0].updated_at });
+});
+
+
+app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
+  try {
+    const { fileName, fileBase64 } = req.body || {};
+    if (typeof fileName !== 'string' || typeof fileBase64 !== 'string' || !fileBase64 || fileBase64.length > 16000000) return res.status(400).json({ error: 'Fichier manquant ou supérieur à 12 Mo.' });
+    const ext = fileName.toLowerCase().split('.').pop();
+    if (!['xlsx','xls','csv','pptx','docx','pdf','txt'].includes(ext || '')) return res.status(415).json({ error: 'Formats acceptés : Excel, PowerPoint, Word, PDF, CSV et TXT.' });
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ error: 'Service IA non configuré : vérifiez GEMINI_API_KEY.' });
+    const buffer = Buffer.from(fileBase64, 'base64');
+    if (!buffer.length || buffer.length > 12 * 1024 * 1024) return res.status(413).json({ error: 'Fichier vide ou supérieur à 12 Mo.' });
+    let extracted = '';
+    let parts: any[] = [];
+    if (['xlsx','xls'].includes(ext || '')) {
+      const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+      extracted = workbook.SheetNames.map(name => 'FEUILLE: ' + name + '\\n' + XLSX.utils.sheet_to_csv(workbook.Sheets[name])).join('\\n\\n');
+    } else if (ext === 'csv' || ext === 'txt') extracted = buffer.toString('utf8');
+    else if (ext === 'pdf') parts.push({ inlineData: { mimeType: 'application/pdf', data: fileBase64 } });
+    else if (ext === 'pptx' || ext === 'docx') {
+      extracted = buffer.toString('binary').replace(/[^\\x20-\\x7E\\n\\r]/g, ' ').replace(/<[^>]+>/g, ' ').replace(/\\s{2,}/g, ' ');
+      extracted = extracted.slice(0, 150000);
+    }
+    if (!parts.length && extracted.trim().length < 20) return res.status(422).json({ error: 'Aucun texte exploitable trouvé dans le fichier.' });
+    const prompt = 'Analyse ce document pour Clarity PM. Retourne uniquement un JSON avec format clarity-ai-import, version 1, scopes[], projects[], meps[], coprojMeetings[], reviewItems[], sourceSummary. Chaque scope: code,name,description,trigrams[]. Chaque project: code,name,description,scopeCode,trigrams[]. Chaque MEP: ref,title,projectCode,trigrams[],version,date,owner,environment,status,priority,changeNumbers[],ritmNumbers[],description,rollback,people[],tasks[],runbook{prerequisites[],executionSteps[]}. Chaque COPROJ: projectCode,date,subject,attendees[],summary,decisions[],actions[{title,owner,dueDate,status}],risks[]. Le Directeur de projets crée les périmètres. Un périmètre contient plusieurs trigrammes et projets. Une MEP peut porter plusieurs trigrammes. COPROJ est rattaché au projet, jamais à une MEP. ServiceNow est manuel, ne prétends pas vérifier les tickets. N’invente rien : place les données incertaines dans reviewItems. Conserve exactement les références CHG et RITM. Ne confonds pas code application et trigramme.\\n\\n' + extracted;
+    parts.unshift({ text: prompt });
+    const response = await ai.models.generateContent({ model: 'gemini-3.7-flash', contents: [{ role: 'user', parts }], config: { responseMimeType: 'application/json' } });
+    const raw = (response.text || '').replace(/^\\s*```(?:json)?\\s*/i,'').replace(/\\s*```\\s*$/,'').trim();
+    const draft = JSON.parse(raw);
+    if (draft.format !== 'clarity-ai-import' || !Array.isArray(draft.scopes) || !Array.isArray(draft.projects) || !Array.isArray(draft.meps) || !Array.isArray(draft.coprojMeetings)) throw new Error('Le résultat IA ne respecte pas le schéma Clarity.');
+    res.json({ success: true, draft, sourceFile: fileName, requiresReview: true });
+  } catch (error: any) {
+    console.error('AI portfolio extraction failed:', error?.message || error);
+    res.status(422).json({ error: error instanceof Error ? error.message : 'Extraction IA impossible.' });
+  }
 });
 
 // Shared workspace snapshot: PostgreSQL is the source of truth for the SPA's project portfolio.
