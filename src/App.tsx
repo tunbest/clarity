@@ -177,7 +177,11 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteProject = async (projId: string) => {
+    const previous = projects;
     const remaining = projects.filter((p) => p.id !== projId);
+    // Update immediately so any pending debounced save of the previous snapshot is cancelled.
+    setProjects(remaining);
+    setActiveProjectId(remaining[0]?.id || '');
     try {
       await workspaceWriteQueue.current;
       const response = await fetch('/api/workspace', {
@@ -189,10 +193,10 @@ export const App: React.FC = () => {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Suppression du projet impossible.');
       workspaceRevisionRef.current = Number(result.revision) || workspaceRevisionRef.current + 1;
-      setProjects(remaining);
-      setActiveProjectId(remaining[0]?.id || '');
       setWorkspaceError(null);
     } catch (error) {
+      setProjects(previous);
+      setActiveProjectId(previous[0]?.id || '');
       setWorkspaceError(error instanceof Error ? error.message : 'Suppression du projet impossible.');
     }
   };
