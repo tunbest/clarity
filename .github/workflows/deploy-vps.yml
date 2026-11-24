@@ -56,35 +56,29 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
-            "APP_DIR='/root/vp' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'REMOTE'
+            "APP_DIR='/root/vp' STACK_DIR='/root/clarity-prod' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'REMOTE'
           set -euo pipefail
 
           command -v git >/dev/null 2>&1 || { echo "Git is not installed." >&2; exit 1; }
           command -v docker >/dev/null 2>&1 || { echo "Docker is not installed." >&2; exit 1; }
           docker compose version >/dev/null 2>&1 || { echo "Docker Compose plugin is missing." >&2; exit 1; }
 
+          # The source checkout and the live Compose project are intentionally separate.
+          # Never recreate the PostgreSQL volume or replace the production .env.
+          test -d "$STACK_DIR" || { echo "Production stack directory is missing: $STACK_DIR" >&2; exit 1; }
+          test -f "$STACK_DIR/docker-compose.yml" || { echo "Production Compose file is missing." >&2; exit 1; }
+          test -f "$STACK_DIR/.env" || { echo "Production environment file is missing." >&2; exit 1; }
+          test -f "$STACK_DIR/db-init/sync-app-role.sh" || { echo "Database role sync script is missing." >&2; exit 1; }
+          docker network inspect shared_network >/dev/null 2>&1 || { echo "External Docker network shared_network is missing." >&2; exit 1; }
+
           mkdir -p "$(dirname "$APP_DIR")"
-          BACKUP_DIR=""
-
-          # Preserve any existing non-Git content, including the production .env.
-          if [ -e "$APP_DIR" ] && [ ! -d "$APP_DIR/.git" ]; then
-            if [ -n "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-              BACKUP_DIR="${APP_DIR}.predeploy.$(date +%Y%m%d%H%M%S)"
-              echo "Preserving existing directory at: $BACKUP_DIR"
-              mv "$APP_DIR" "$BACKUP_DIR"
-            else
-              rmdir "$APP_DIR"
-            fi
-          fi
-
-          # Clone only into a path that does not already exist.
           if [ ! -d "$APP_DIR/.git" ]; then
+            if [ -e "$APP_DIR" ] && [ -n "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+              BACKUP_DIR="${APP_DIR}.predeploy.$(date +%Y%m%d%H%M%S)"
+              echo "Preserving pre-existing source directory at: $BACKUP_DIR"
+              mv "$APP_DIR" "$BACKUP_DIR"
+            fi
             git clone --no-checkout https://github.com/tunbest/clarity.git "$APP_DIR"
-          fi
-
-          # Restore the production environment file after the clone.
-          if [ -n "$BACKUP_DIR" ] && [ -f "$BACKUP_DIR/.env" ]; then
-            install -m 600 "$BACKUP_DIR/.env" "$APP_DIR/.env"
           fi
 
           cd "$APP_DIR"
@@ -92,28 +86,42 @@ jobs:
           git fetch origin "$DEPLOY_SHA"
           git checkout --detach --force "$DEPLOY_SHA"
 
-          test -f .env || { echo "Production .env is missing on the VPS ($APP_DIR/.env)." >&2; exit 1; }
-          if [ ! -f docker-compose.yml ] && [ ! -f compose.yml ] && [ ! -f compose.yaml ] && [ ! -f docker-compose.yaml ]; then
-            echo "No Docker Compose file found in $APP_DIR." >&2
-            exit 1
-          fi
+          for file in Dockerfile package.json scripts/build-server.mjs src/db/schema.sql; do
+            test -f "$APP_DIR/$file" || { echo "Required source file missing: $file" >&2; exit 1; }
+          done
+          test -f "$APP_DIR/.dockerignore" || { echo ".dockerignore is missing; refusing to build with a potentially unsafe context." >&2; exit 1; }
 
-          docker compose config --quiet
-          docker compose up -d --build --remove-orphans
+          # Temporary Compose override: reuse the live project, env, network and DB volume,
+          # while building only the app image from the freshly checked-out source.
+          OVERRIDE_FILE="$STACK_DIR/docker-compose.deploy.yml"
+          cleanup() { rm -f "$OVERRIDE_FILE"; }
+          trap cleanup EXIT
+          cat > "$OVERRIDE_FILE" <<'YAML'
+          services:
+            app:
+              build:
+                context: /root/vp
+                dockerfile: Dockerfile
+          YAML
+
+          COMPOSE=(docker compose --project-directory "$STACK_DIR" --env-file "$STACK_DIR/.env" -f "$STACK_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
+
+          "${COMPOSE[@]}" config --quiet
+          "${COMPOSE[@]}" up -d --build app
 
           healthy=0
-          for attempt in $(seq 1 30); do
-            if docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+          for attempt in $(seq 1 36); do
+            if "${COMPOSE[@]}" exec -T app curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
               healthy=1
               break
             fi
             sleep 5
           done
 
-          docker compose ps
+          "${COMPOSE[@]}" ps
           if [ "$healthy" -ne 1 ]; then
-            docker compose logs --tail=120 app postgres || true
-            echo "Clarity health check failed." >&2
+            "${COMPOSE[@]}" logs --tail=150 app postgres db-credentials-sync || true
+            echo "Clarity health check failed. The existing PostgreSQL volume was not removed." >&2
             exit 1
           fi
 
