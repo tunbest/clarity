@@ -80,6 +80,8 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         return silent.accessToken;
       } catch (error) {
         if (!(error instanceof InteractionRequiredAuthError)) throw error;
+        const popup = await instance.acquireTokenPopup({ scopes, account });
+        return popup.accessToken;
       }
     }
     const result = await instance.loginPopup({ scopes, prompt: 'select_account' });
@@ -116,7 +118,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       const project = selectedProject;
       return {
         project: project ? { code: project.code, name: project.name, description: project.description, status: project.status, startDate: project.startDate, endDate: project.endDate } : null,
-        tasks: (project?.tasks || []).map((t) => ({ title: t.title, status: t.status, assignee: t.assigneeId, startDate: t.startDate, dueDate: t.dueDate, completion: t.completionPercent })),
+        tasks: (project?.tasks || []).map((t) => ({ title: t.title, status: t.status, assignee: project?.members?.find((member) => member.id === t.assigneeId)?.name || t.assigneeId || 'Non affecté', startDate: t.startDate, dueDate: t.dueDate, completion: t.completionPercent })),
         milestones: (project?.milestones || []).map((m) => ({ title: m.title, targetDate: m.targetDate, completed: m.completed })),
         risks: (project?.risks || []).map((r) => ({ title: r.title, status: r.status, probability: r.probability, impact: r.impact, mitigation: r.mitigationPlan })),
         meetingNotes,
