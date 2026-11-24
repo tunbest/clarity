@@ -286,6 +286,11 @@ app.put('/api/scopes', async (req: Request, res: Response) => {
   const normalizedScopes = scopes.map((s: any) => ({ ...s, code: s.code.trim().toUpperCase(), trigrams: Array.from(new Set(s.trigrams.map((t: string) => t.trim().toUpperCase()))) }));
   const actor = getUserFromRequest(req);
   if (!['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(actor.role || '')) return res.status(403).json({ error: 'Seul le Directeur de Projets peut modifier le référentiel partagé des trigrammes.' });
+  const currentScopeState=await getPgPool()!.query('SELECT scopes FROM portfolio_scope_state WHERE id=1');
+  const oldScopes:any[]=currentScopeState.rows[0]?.scopes||[];
+  const workspaceState=await getPgPool()!.query('SELECT projects FROM workspace_state WHERE id=1');
+  const existingProjects:any[]=workspaceState.rows[0]?.projects||[];
+  for(const oldScope of oldScopes){const next=normalizedScopes.find((scope:any)=>scope.id===oldScope.id);const removed=(oldScope.trigrams||[]).filter((trigram:string)=>!(next?.trigrams||[]).includes(String(trigram).toUpperCase()));if(removed.some((trigram:string)=>existingProjects.some((project:any)=>project.scopeId===oldScope.id&&(project.trigrams||[]).map((v:string)=>String(v).toUpperCase()).includes(String(trigram).toUpperCase()))))return res.status(409).json({error:'Un trigramme encore utilisé par un projet ne peut pas être supprimé. Réaffectez d’abord les projets concernés.'});}
   const result = await getPgPool()!.query('UPDATE portfolio_scope_state SET scopes=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision,updated_at', [JSON.stringify(normalizedScopes), revision]);
   if (!result.rowCount) return res.status(409).json({ error: 'Les périmètres ont été modifiés par un autre utilisateur. Rechargez la page.' });
   res.json({ success: true, revision: Number(result.rows[0].revision), updatedAt: result.rows[0].updated_at });
@@ -377,7 +382,7 @@ app.put('/api/workspace', async (req: Request,res: Response) => {
 // Atomic full-workspace JSON restore: projects and every linked MEP record move together.
 app.post('/api/workspace/import', async (req: Request, res: Response) => {
   const actor = getUserFromRequest(req);
-  if (!RBAC.canCreateOrDeleteProject(actor.role || 'CONTRIBUTEUR')) {
+  if (!['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(actor.role || '')) {
     return res.status(403).json({ error: 'Seuls le Directeur de Projets ou l’Administrateur peuvent importer le portefeuille complet.' });
   }
   const projects = req.body?.projects;
