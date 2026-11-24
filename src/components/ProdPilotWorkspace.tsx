@@ -3238,7 +3238,13 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                         >
                           <option value="">Tâche projet : aucune</option>
                           {(clarityProjects.find((p) => p.id === mepForm.projectId)?.tasks || []).map((projectTask) => (
-                            <option key={projectTask.id} value={projectTask.id}>{projectTask.title}</option>
+                            <option
+                              key={projectTask.id}
+                              value={projectTask.id}
+                              disabled={db.mep.some((entry) => entry.id !== editMepId && entry.projectId === mepForm.projectId && entry.tasks.some((linkedTask) => linkedTask.projectTaskId === projectTask.id)) || taskDraft.some((other, otherIndex) => otherIndex !== i && other.projectTaskId === projectTask.id)}
+                            >
+                              {projectTask.title}
+                            </option>
                           ))}
                         </select>
                         <select
@@ -3254,7 +3260,13 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                         >
                           <option value="">Jalon projet : aucun</option>
                           {(clarityProjects.find((p) => p.id === mepForm.projectId)?.milestones || []).map((milestone) => (
-                            <option key={milestone.id} value={milestone.id}>{milestone.title}</option>
+                            <option
+                              key={milestone.id}
+                              value={milestone.id}
+                              disabled={db.mep.some((entry) => entry.id !== editMepId && entry.projectId === mepForm.projectId && entry.tasks.some((linkedTask) => linkedTask.projectMilestoneId === milestone.id))}
+                            >
+                              {milestone.title}
+                            </option>
                           ))}
                         </select>
                         <select
