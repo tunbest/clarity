@@ -243,7 +243,7 @@ export const AddEditProjectModal: React.FC<AddEditProjectModalProps> = ({
       milestones: project?.milestones || [],
       risks: project?.risks || [],
       members: project?.members || [
-        { id: `mem-${Date.now()}`, name: managerName.trim(), role: 'Chef de Projet', email: 'cp@entreprise.fr', hourlyRate: 90, maxWeeklyHours: 35, color: '#4F46E5' },
+        { id: `mem-${Date.now()}`, name: managerName.trim(), role: 'Chef de Projet', email: 'cp@entreprise.fr', maxWeeklyHours: 35, color: '#4F46E5' },
       ],
       createdAt: project?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
