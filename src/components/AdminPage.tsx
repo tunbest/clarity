@@ -872,7 +872,7 @@ CREATE TYPE user_role_enum AS ENUM ('DIRECTEUR_PROJETS', 'CHEF_PROJET', 'PMO', '
 CREATE TABLE IF NOT EXISTS users (id VARCHAR(64) PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, role user_role_enum NOT NULL);
 CREATE TABLE IF NOT EXISTS projects (id VARCHAR(64) PRIMARY KEY, code VARCHAR(32) UNIQUE NOT NULL, name VARCHAR(255) NOT NULL, start_date DATE, end_date DATE);
 CREATE TABLE IF NOT EXISTS tasks (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), wbs_code VARCHAR(32), progress INT);
-CREATE TABLE IF NOT EXISTS team_members (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), daily_rate_tjm NUMERIC(10,2));
+CREATE TABLE IF NOT EXISTS team_members (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), max_weekly_hours INT);
 CREATE TABLE IF NOT EXISTS risks (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), score INT, severity VARCHAR(32));
 CREATE TABLE IF NOT EXISTS project_milestones (id VARCHAR(64) PRIMARY KEY, project_id VARCHAR(64) REFERENCES projects(id), target_date DATE);
 CREATE TABLE IF NOT EXISTS audit_logs (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_role VARCHAR(64), action VARCHAR(64), created_at TIMESTAMPTZ);
