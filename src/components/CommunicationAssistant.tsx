@@ -127,6 +127,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         micStreamRef.current = mic;
         const context = new AudioContext();
         audioContextRef.current = context;
+        await context.resume();
         const destination = context.createMediaStreamDestination();
         context.createMediaStreamSource(new MediaStream(systemTracks)).connect(destination);
         context.createMediaStreamSource(mic).connect(destination);
