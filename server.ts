@@ -745,8 +745,7 @@ app.get('/api/projects/:id', (req: Request, res: Response) => {
 
 // CREATE PROJECT — Restricted to DIRECTEUR_PROJETS and ADMINISTRATEUR
 app.post('/api/projects', (req: Request, res: Response) => {
-  const user = getUserFromRequest(req);const existing=dbStore.getProjectById(req.params.id);
-  if(user.role==='CHEF_PROJET' && (existing as any)?.managerId!==user.id)return res.status(404).json({error:'Projet introuvable.'});
+  const user = getUserFromRequest(req);
   if (!RBAC.canCreateOrDeleteProject(user.role || 'DIRECTEUR_PROJETS')) {
     return res.status(403).json({
       error: 'Accès refusé : Seul le Directeur de Projets ou l’Administrateur est habilité à initialiser de nouveaux projets.',
@@ -767,7 +766,8 @@ app.post('/api/projects', (req: Request, res: Response) => {
       name: projectPayload.name,
       description: projectPayload.description || '',
       client: projectPayload.client || 'Direction Générale',
-      managerName: projectPayload.managerName || user.displayName,
+      managerId: user.role === 'CHEF_PROJET' ? user.id : (projectPayload.managerId || undefined),
+      managerName: user.role === 'CHEF_PROJET' ? user.displayName : (projectPayload.managerName || user.displayName),
       status: projectPayload.status || 'PLANNING',
       priority: projectPayload.priority || 'HIGH',
       methodology: projectPayload.methodology || 'HYBRID',
@@ -791,8 +791,7 @@ app.post('/api/projects', (req: Request, res: Response) => {
 
 // UPDATE PROJECT
 app.put('/api/projects/:id', (req: Request, res: Response) => {
-  const user = getUserFromRequest(req);const existing=dbStore.getProjectById(req.params.id);
-  if(user.role==='CHEF_PROJET' && (existing as any)?.managerId!==user.id)return res.status(404).json({error:'Projet introuvable.'});
+  const user = getUserFromRequest(req);
   const updated = dbStore.updateProject(req.params.id, req.body, user);
   if (!updated) {
     return res.status(404).json({ error: 'Projet introuvable.' });
