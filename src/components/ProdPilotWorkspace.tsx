@@ -366,7 +366,37 @@ const getMepProgress = (m: MepEntry) => {
 
 const normalizeMep = (x: any, projects: Project[]): MepEntry => {
   const project = projects.find((p) => p.id === x.projectId) || projects.find((p) => p.name === x.project);
-  return { ...x, projectId: project?.id || x.projectId || '', project: project?.name || x.project || 'Projet non classé', minutes: Array.isArray(x.minutes) ? x.minutes : [], runbook: normalizeRunbook(x.runbook, x.owner || ''), changeNumbers: x.changeNumbers || x.changeRef || '', ritmNumbers: x.ritmNumbers || '', people: Array.isArray(x.people) ? x.people : [], tasks: (x.tasks || []).map(normalizeTask) };
+  const id = String(x.id || uid('MEP'));
+  return {
+    ...x,
+    id,
+    ref: String(x.ref || ''),
+    projectId: project?.id || x.projectId || '',
+    project: project?.name || x.project || 'Projet non classé',
+    title: String(x.title || 'Nouvelle mise en production'),
+    version: String(x.version || ''),
+    date: String(x.date || isoToday()),
+    owner: String(x.owner || ''),
+    environment: ['Production', 'Préproduction', 'Recette'].includes(x.environment) ? x.environment : 'Production',
+    status: MEP_STATUSES.includes(x.status) ? x.status : 'Brouillon',
+    priority: ['Critique', 'Haute', 'Normale', 'Basse'].includes(x.priority) ? x.priority : 'Normale',
+    goNoGo: ['En attente', 'GO', 'NO-GO'].includes(x.goNoGo) ? x.goNoGo : 'En attente',
+    changeNumbers: String(x.changeNumbers || x.changeRef || ''),
+    ritmNumbers: String(x.ritmNumbers || ''),
+    rollback: String(x.rollback || ''),
+    description: String(x.description || ''),
+    people: Array.isArray(x.people) ? x.people.map((p: any) => ({ name: String(p?.name || ''), role: String(p?.role || '') })) : [],
+    tasks: Array.isArray(x.tasks) ? x.tasks.map(normalizeTask) : [],
+    minutes: Array.isArray(x.minutes) ? x.minutes.map((m: any) => ({
+      ...m, id: String(m?.id || uid('CR')), mepId: id, date: String(m?.date || isoToday()),
+      type: String(m?.type || 'Point projet'), subject: String(m?.subject || ''),
+      attendees: String(m?.attendees || ''), summary: String(m?.summary || ''),
+      decisions: String(m?.decisions || ''), actions: String(m?.actions || ''), risks: String(m?.risks || ''),
+    })) : [],
+    runbook: normalizeRunbook(x.runbook, x.owner || ''),
+    createdAt: x.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 };
 
 const getStatusBadgeClasses = (status: string) => {
@@ -475,6 +505,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const [runbookTab, setRunbookTab] = useState<'settings' | 'prerequisites' | 'execution' | 'rollback'>('settings');
   const [editMepId, setEditMepId] = useState<string | null>(null);
   const [mepForm, setMepForm] = useState<Partial<MepEntry>>({});
+  const mepImportInputRef = useRef<HTMLInputElement | null>(null);
   const [personDraft, setPersonDraft] = useState<MepPerson[]>([]);
   const [taskDraft, setTaskDraft] = useState<MepTask[]>([]);
 
@@ -1139,6 +1170,43 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     showToast('Export MEP CSV généré');
   };
 
+  const handleImportMepsJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const source = Array.isArray(parsed) ? parsed
+        : Array.isArray(parsed?.meps) ? parsed.meps
+        : Array.isArray(parsed?.mep) ? parsed.mep : null;
+      if (!source) throw new Error('Le JSON doit contenir un tableau MEP, meps ou mep.');
+      const existingIds = new Set(db.mep.map((m) => m.id));
+      const imported = source.map((raw: any) => {
+        const mep = normalizeMep(raw, clarityProjects);
+        const project = clarityProjects.find((p) => p.id === mep.projectId);
+        if (!project) throw new Error(`Projet introuvable pour la MEP « ${mep.title} ».`);
+        if (existingIds.has(mep.id)) mep.id = uid('MEP');
+        existingIds.add(mep.id);
+        mep.project = project.name;
+        mep.minutes = mep.minutes.map((minute) => ({ ...minute, mepId: mep.id }));
+        return mep;
+      });
+      if (!imported.length) throw new Error('Le fichier ne contient aucune MEP.');
+      setConfirmAction({
+        title: 'Ajouter les MEP du fichier JSON ?',
+        message: `Ajouter ${imported.length} MEP au portefeuille actuel sans supprimer les ${db.mep.length} MEP existantes ? Les prérequis, étapes, intervenants, tâches, jalons, Change, RITM, comptes rendus et plans de retour arrière seront importés.`,
+        confirmLabel: 'Ajouter les MEP',
+        onConfirm: () => {
+          persistDb({ ...db, mep: [...db.mep, ...imported] });
+          setConfirmAction(null);
+          showToast(`${imported.length} MEP importée(s)`);
+        },
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Fichier JSON invalide ou incompatible');
+    }
+  };
+
   const handleRestoreBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -1235,6 +1303,14 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+            <button
+              onClick={() => mepImportInputRef.current?.click()}
+              className="px-3.5 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Ajouter depuis JSON</span>
+            </button>
+            <input ref={mepImportInputRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportMepsJson} />
             <button
               onClick={handleBackupJson}
               className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
