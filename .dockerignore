@@ -8,7 +8,6 @@ coverage
 .env.*
 !.env.example
 backups
-*.sql
 *.dump
 *.pem
 *.key
