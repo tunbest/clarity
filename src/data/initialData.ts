@@ -47,7 +47,7 @@ export const DEFAULT_KPI_WIDGETS: KPIWidget[] = [
     id: 'w-workload',
     type: 'WORKLOAD_BAR',
     title: 'Charge & Capacité des Ressources',
-    description: 'Heures réelles vs budget d’heures par collaborateur',
+    description: 'Heures estimées et réalisées par collaborateur',
     size: 'LARGE',
     isVisible: true,
     order: 8,
