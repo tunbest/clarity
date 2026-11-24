@@ -122,6 +122,42 @@ export const App: React.FC = () => {
     setScopesRevision(Number(result.revision) || scopesRevision + 1);
   };
 
+  const handleImportCatalog = async (payload: any) => {
+    if (!payload || payload.format !== 'clarity-catalog' || payload.version !== 1 || !Array.isArray(payload.scopes) || !Array.isArray(payload.projects)) throw new Error('JSON invalide : format clarity-catalog version 1 attendu.');
+    const now = new Date().toISOString();
+    const mergedScopes = [...scopes];
+    for (const item of payload.scopes) {
+      const code = String(item?.code || '').trim().toUpperCase();
+      const name = String(item?.name || '').trim();
+      if (!code || !name || !Array.isArray(item.trigrams)) throw new Error('Chaque périmètre doit contenir code, name et trigrams[].');
+      const normalizedTrigrams = Array.from(new Set(item.trigrams.map((value: unknown) => String(value || '').trim().toUpperCase()).filter(Boolean)));
+      const existing = mergedScopes.find((scope) => scope.code.toUpperCase() === code);
+      if (existing) {
+        existing.trigrams = Array.from(new Set([...existing.trigrams, ...normalizedTrigrams]));
+        existing.updatedAt = now;
+      } else {
+        mergedScopes.push({ id: `SCOPE-${code}-${Date.now().toString(36).toUpperCase()}`, code, name, description: String(item.description || ''), trigrams: normalizedTrigrams, createdAt: now, updatedAt: now });
+      }
+    }
+    const additions: Project[] = [];
+    const updates = new Map<string, Project>();
+    for (const item of payload.projects) {
+      const code = String(item?.code || '').trim().toUpperCase();
+      const name = String(item?.name || '').trim();
+      const scopeCode = String(item?.scopeCode || '').trim().toUpperCase();
+      if (!code || !name || !scopeCode || !Array.isArray(item.trigrams)) throw new Error('Chaque projet doit contenir code, name, scopeCode et trigrams[].');
+      const scope = mergedScopes.find((value) => value.code.toUpperCase() === scopeCode);
+      if (!scope) throw new Error(`Périmètre introuvable pour le projet ${code} : ${scopeCode}`);
+      const trigrams = Array.from(new Set(item.trigrams.map((value: unknown) => String(value || '').trim().toUpperCase()).filter(Boolean)));
+      if (trigrams.some((value) => !scope.trigrams.includes(value))) throw new Error(`Les trigrammes du projet ${code} doivent être définis dans le périmètre ${scopeCode}.`);
+      const existing = projects.find((project) => project.code.toUpperCase() === code);
+      if (existing) updates.set(existing.id, { ...existing, name, description: String(item.description || existing.description || ''), scopeId: scope.id, trigrams, updatedAt: now });
+      else additions.push({ id: `proj-${Date.now()}-${additions.length}`, code, name, description: String(item.description || ''), scopeId: scope.id, trigrams, client: '', managerName: currentUser?.displayName || '', status: 'PLANNING', projectStatus: 'Planning', priority: 'MEDIUM', methodology: 'HYBRID', startDate: now.slice(0,10), endDate: new Date(Date.now()+90*86400000).toISOString().slice(0,10), totalBudget: 0, currency: '€', members: [], tasks: [], milestones: [], risks: [], kpiWidgets: [], createdAt: now, updatedAt: now });
+    }
+    await handleSaveScopes(mergedScopes);
+    setProjects((current) => [...current.map((project) => updates.get(project.id) || project), ...additions]);
+  };
+
   const [activeProjectId, setActiveProjectId] = useState<string>(() => {
     return projects[0]?.id || 'proj-apollo-1';
   });
@@ -528,6 +564,9 @@ export const App: React.FC = () => {
                 projects={projects}
                 scopes={scopes}
                 canManageScopes={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR'}
+                canManageProjectCatalog={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR' || currentUser.role === 'CHEF_PROJET'}
+                onImportCatalog={handleImportCatalog}
+                onEditProject={(project) => setProjectModalState({ isOpen: true, project })}
                 onSaveScopes={handleSaveScopes}
                 onUpdateProject={handleUpdateProject}
                 onSelectProject={(id) => {
@@ -673,10 +712,10 @@ export const App: React.FC = () => {
         <AddEditProjectModal
           project={projectModalState.project}
           scopes={scopes}
-          canManageScopes={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR'}
+          canManageScopes={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR' || currentUser.role === 'CHEF_PROJET'}
           onClose={() => setProjectModalState({ isOpen: false, project: null })}
           onSaveProject={handleSaveProject}
-          onDeleteProject={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR' ? handleDeleteProject : undefined}
+          onDeleteProject={currentUser.role === 'DIRECTEUR_PROJETS' || currentUser.role === 'ADMINISTRATEUR' || currentUser.role === 'CHEF_PROJET' ? handleDeleteProject : undefined}
         />
       )}
 
