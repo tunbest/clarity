@@ -1213,11 +1213,15 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
-      if (!Array.isArray(parsed.mep)) throw new Error('Format invalide');
-      const restoredMeps = parsed.mep.map((m: any) => {
-        const project = clarityProjects.find((p) => p.id === m.projectId) || clarityProjects.find((p) => p.name === m.project);
-        if (!project) throw new Error(`La MEP « ${m.title || m.id} » n'est liée à aucun projet Clarity existant. Réaffectez-la avant restauration.`);
-        return { ...m, projectId: project.id, project: project.name, changeNumbers: m.changeNumbers || m.changeRef || '', ritmNumbers: m.ritmNumbers || '', people: m.people || [], minutes: m.minutes || [], tasks: (m.tasks || []).map(normalizeTask) };
+      const source = Array.isArray(parsed) ? parsed
+        : Array.isArray(parsed?.meps) ? parsed.meps
+        : Array.isArray(parsed?.mep) ? parsed.mep : null;
+      if (!source) throw new Error('Format invalide : tableau MEP, meps ou mep attendu.');
+      const restoredMeps = source.map((raw: any) => {
+        const mep = normalizeMep(raw, clarityProjects);
+        const project = clarityProjects.find((p) => p.id === mep.projectId);
+        if (!project) throw new Error(`La MEP « ${mep.title || mep.id} » n'est liée à aucun projet Clarity existant. Réaffectez-la avant restauration.`);
+        return { ...mep, projectId: project.id, project: project.name };
       });
       setConfirmAction({
         title: 'Restaurer la sauvegarde ?',
