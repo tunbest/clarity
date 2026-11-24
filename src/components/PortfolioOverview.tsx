@@ -221,7 +221,6 @@ export const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
                 <th className="p-3">Score Santé</th>
                 <th className="p-3">Indicateur planning (SPI)</th>
                 <th className="p-3">Avancement</th>
-                <th className="p-3 text-right">Budget Consommé / Alloué</th>
                 <th className="p-3 text-right">Action</th>
               </tr>
             </thead>
