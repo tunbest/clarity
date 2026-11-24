@@ -12,10 +12,10 @@ const displayValue = (v: unknown) => {
   return String(v);
 };
 const cleanTeamsTranscript = (source: string) => source
-  .replace(/^\\uFEFF/, '').replace(/^WEBVTT[^\\n]*\\n?/i, '').replace(/^\\d+\\s*$/gm, '')
-  .replace(/\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+-->\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}[^\\n]*\\n?/g, '')
-  .replace(/<v\\s+([^>]+)>/gi, '$1 : ').replace(/<\\/?v>/gi, '').replace(/<[^>]+>/g, '')
-  .replace(/\\n{3,}/g, '\\n\\n').trim();
+  .replace(/^\uFEFF/, '').replace(/^WEBVTT[^\n]*\n?/i, '').replace(/^\d+\s*$/gm, '')
+  .replace(/\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}[^\n]*\n?/g, '')
+  .replace(/<v\s+([^>]+)>/gi, '$1 : ').replace(/<\/?v>/gi, '').replace(/<[^>]+>/g, '')
+  .replace(/\n{3,}/g, '\n\n').trim();
 const categoryForMode = (mode: CommunicationMode, recipient: Recipient) =>
   mode === 'mep-start' ? Boolean(recipient.start)
     : mode === 'mep-end' ? Boolean(recipient.end)
@@ -102,7 +102,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         '',
         'Cordialement,'
       ];
-      body = lines.join('\\n');
+      body = lines.join('\n');
     } else {
       subject = `Compte rendu COPROJ | ${projectName} | ${new Date().toLocaleDateString('fr-FR')}`;
       body = [
@@ -136,7 +136,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         'Merci de me transmettre vos corrections ou compléments.',
         '',
         'Cordialement,'
-      ].join('\\n');
+      ].join('\n');
     }
     setDraft({ subject, body });
     setMessage('Brouillon structuré. Vérifiez les informations avant ouverture dans Outlook.');
@@ -146,7 +146,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const importTranscript = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!/\\.(txt|vtt)$/i.test(file.name)) {
+    if (!/\.(txt|vtt)$/i.test(file.name)) {
       setMessage('Import limité aux fichiers .txt et .vtt exportés depuis Teams.');
       setNotice('warning'); event.target.value = ''; return;
     }
@@ -164,7 +164,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     const selected = savedRecipients.filter((recipient) => selectedRecipientIds.includes(recipient.id));
     const to = selected.filter((recipient) => recipient.to !== false && recipient.email).map((recipient) => recipient.email);
     const cc = selected.filter((recipient) => recipient.cc && recipient.email).map((recipient) => recipient.email);
-    const manual = manualRecipients.split(/[;,\\n]/).map((x) => x.trim()).filter(Boolean);
+    const manual = manualRecipients.split(/[;,\n]/).map((x) => x.trim()).filter(Boolean);
     const uniqueTo = Array.from(new Set([...to, ...manual]));
     const uniqueCc = Array.from(new Set(cc.filter((email) => !uniqueTo.includes(email))));
     const encodeList = (items: string[]) => items.map((email) => encodeURIComponent(email)).join(',');
@@ -181,7 +181,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
 
   const copyDraft = async () => {
     try {
-      await navigator.clipboard.writeText(draft.subject + '\\n\\n' + draft.body);
+      await navigator.clipboard.writeText(draft.subject + '\n\n' + draft.body);
       setMessage('Objet et contenu copiés.'); setNotice('success');
     } catch { setMessage('Copie automatique indisponible dans ce navigateur.'); setNotice('warning'); }
   };
