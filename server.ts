@@ -35,6 +35,14 @@ function getUserFromRequest(req: Request): AppUser {
   return user;
 }
 
+// Remove legacy financial properties from old persisted projects and imported backups.
+const FINANCIAL_FIELD_PATTERN = /budget|cost|financial|currency|hourlyrate|dailyrate|tjm|^bac$|^pv$|^ev$|^ac$|^cv$|^cpi$|^eac$|^etc$|^vac$|^sv$/i;
+function stripFinancialFields(value: any): any {
+  if (Array.isArray(value)) return value.map(stripFinancialFields);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !FINANCIAL_FIELD_PATTERN.test(key)).map(([key, item]) => [key, stripFinancialFields(item)]));
+}
+
 // Strict RBAC Permission Evaluator
 const RBAC = {
   canCreateOrDeleteProject: (role: UserRole) => {
@@ -355,11 +363,11 @@ app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
 app.get('/api/workspace', async (req: Request,res: Response) => {
   const pool=getPgPool()!; let r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');
   if(!r.rowCount){await pool.query('INSERT INTO workspace_state(id,projects,revision) VALUES(1,$1::jsonb,1) ON CONFLICT(id) DO NOTHING',[JSON.stringify(dbStore.getAllProjects())]);r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');}
-  const actor=getUserFromRequest(req);const all:any[]=r.rows[0].projects||[];const visible=actor.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===actor.id):all;
+  const actor=getUserFromRequest(req);const all:any[]=(r.rows[0].projects||[]).map(stripFinancialFields);const visible=actor.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===actor.id):all;
   res.json({success:true,projects:visible,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
 });
 app.put('/api/workspace', async (req: Request,res: Response) => {
-  const submitted=req.body?.projects;const revision=Number(req.body?.revision);const actor=getUserFromRequest(req);
+  const submitted=stripFinancialFields(req.body?.projects);const revision=Number(req.body?.revision);const actor=getUserFromRequest(req);
   if(!Array.isArray(submitted)||submitted.length>500||!Number.isSafeInteger(revision)||revision<1||submitted.some((p:any)=>!p||typeof p!=='object'||typeof p.id!=='string'||typeof p.name!=='string'||p.id.length>128||p.name.length>300))return res.status(400).json({error:'Données de portefeuille invalides.'});
   const pool=getPgPool()!;const current=await pool.query('SELECT projects FROM workspace_state WHERE id=1');const all:any[]=current.rows[0]?.projects||[];let next:any[];
   const scopeState=await pool.query('SELECT scopes FROM portfolio_scope_state WHERE id=1');const scopeById=new Map<string,any>((scopeState.rows[0]?.scopes||[]).map((s:any)=>[String(s.id),s] as [string,any]));
@@ -386,7 +394,7 @@ app.post('/api/workspace/import', async (req: Request, res: Response) => {
   if (!['ADMINISTRATEUR','DIRECTEUR_PROJETS'].includes(actor.role || '')) {
     return res.status(403).json({ error: 'Seuls le Directeur de Projets ou l’Administrateur peuvent importer le portefeuille complet.' });
   }
-  const projects = req.body?.projects;
+  const projects = stripFinancialFields(req.body?.projects);
   const meps = req.body?.meps;
   const scopes = req.body?.scopes;
   const workspaceRevision = Number(req.body?.workspaceRevision);
@@ -679,7 +687,7 @@ app.get('/api/portfolio/summary', (req: Request, res: Response) => {
 
 // 3. Projects Endpoints (CRUD)
 app.get('/api/projects', (req: Request, res: Response) => {
-  const user=getUserFromRequest(req);const all=dbStore.getAllProjects();const projects=user.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===user.id):all;
+  const user=getUserFromRequest(req);const all=dbStore.getAllProjects().map(stripFinancialFields);const projects=user.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===user.id):all;
   res.json({ success: true, count: projects.length, data: projects });
 });
 
@@ -690,7 +698,7 @@ app.get('/api/projects/:id', (req: Request, res: Response) => {
   if (!project) {
     return res.status(404).json({ error: 'Projet introuvable.' });
   }
-  res.json({ success: true, data: project });
+  res.json({ success: true, data: stripFinancialFields(project) });
 });
 
 // CREATE PROJECT — Restricted to DIRECTEUR_PROJETS and ADMINISTRATEUR
@@ -740,7 +748,7 @@ app.post('/api/projects', (req: Request, res: Response) => {
 // UPDATE PROJECT
 app.put('/api/projects/:id', (req: Request, res: Response) => {
   const user = getUserFromRequest(req);
-  const updated = dbStore.updateProject(req.params.id, req.body, user);
+  const updated = dbStore.updateProject(req.params.id, stripFinancialFields(req.body), user);
   if (!updated) {
     return res.status(404).json({ error: 'Projet introuvable.' });
   }
@@ -802,7 +810,7 @@ app.post('/api/projects/:id/tasks', (req: Request, res: Response) => {
 
 app.put('/api/projects/:id/tasks/:taskId', (req: Request, res: Response) => {
   const user = getUserFromRequest(req);
-  const updated = dbStore.updateTask(req.params.id, req.params.taskId, req.body, user);
+  const updated = dbStore.updateTask(req.params.id, req.params.taskId, stripFinancialFields(req.body), user);
   if (!updated) return res.status(404).json({ error: 'Tâche ou projet introuvable.' });
   res.json({ success: true, data: updated });
 });
@@ -853,7 +861,7 @@ app.put('/api/projects/:id/team/:memberId', (req: Request, res: Response) => {
     });
   }
 
-  const updated = dbStore.updateTeamMember(req.params.id, req.params.memberId, req.body, user);
+  const updated = dbStore.updateTeamMember(req.params.id, req.params.memberId, stripFinancialFields(req.body), user);
   if (!updated) return res.status(404).json({ error: 'Membre ou projet introuvable.' });
   res.json({ success: true, data: updated });
 });
@@ -904,7 +912,7 @@ app.post('/api/projects/:id/risks', (req: Request, res: Response) => {
 
 app.put('/api/projects/:id/risks/:riskId', (req: Request, res: Response) => {
   const user = getUserFromRequest(req);
-  const updated = dbStore.updateRisk(req.params.id, req.params.riskId, req.body, user);
+  const updated = dbStore.updateRisk(req.params.id, req.params.riskId, stripFinancialFields(req.body), user);
   if (!updated) return res.status(404).json({ error: 'Risque ou projet introuvable.' });
   res.json({ success: true, data: updated });
 });
@@ -962,7 +970,7 @@ app.get('/api/audit-logs', (req: Request, res: Response) => {
 
 // API: PM AI Diagnostic & Audit
 app.post('/api/pm-ai/audit', async (req: Request, res: Response) => {
-  const { projectData } = req.body;
+  const projectData = stripFinancialFields(req.body?.projectData);
   if (!projectData) {
     return res.status(400).json({ error: 'Données du projet manquantes.' });
   }
@@ -1016,7 +1024,7 @@ Réponds en JSON valide :
 
 // API: PM AI Flash Report (Compte-rendu Comité de Pilotage COPIL)
 app.post('/api/pm-ai/copil-report', async (req: Request, res: Response) => {
-  const { projectData, audience = 'COPIL' } = req.body;
+  const projectData = stripFinancialFields(req.body?.projectData); const audience = req.body?.audience || 'COPIL';
 
   const generateDynamicCopilReport = (data: any, aud: string) => {
     const spi=Number(data?.spi)||1;const progress=Number(data?.progress)||0;const status=data?.status||'IN_PROGRESS';const completedTasks=Number(data?.completedTasksCount)||0;const totalTasks=Number(data?.totalTasksCount)||0;const activeRisks=Number(data?.activeRisksCount)||0;const overdueTasks=Number(data?.overdueTasksCount)||0;
