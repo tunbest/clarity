@@ -1495,31 +1495,15 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
           1. DASHBOARD (VUE GÉNÉRALE)
          ===================================================================== */}
       {page === 'mep' && (
-        <div className="space-y-6">
-          {/* Welcome Banner */}
-          <div className="bg-gradient-to-r from-indigo-50 via-white to-sky-50 border border-indigo-100 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider mb-1">
-                Centre de Commandement Production
+        <div className="space-y-5">
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900">Indicateurs de production</h3>
+                <p className="text-xs text-slate-500">Vue immédiate des MEP à piloter et des alertes opérationnelles</p>
               </div>
-              <h3 className="text-xl font-black text-slate-900 tracking-tight">
-                Bonjour {currentUser.displayName}, votre production sous contrôle.
-              </h3>
-              <p className="text-xs text-slate-600 mt-1">
-                Suivi des MEP, des Changes ServiceNow associés, des équipes intervenantes et des jalons planifiés.
-              </p>
+              <span className="rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-bold text-indigo-700">{db.mep.length} MEP au total</span>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={handleBackupJson}
-                className="px-4 py-2 bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Exporter le rapport</span>
-              </button>
-            </div>
-          </div>
-
           {/* 4 KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
@@ -1566,7 +1550,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               <div className="text-[11px] text-slate-500 mt-1">Critiques, hautes ou en retard</div>
             </div>
           </div>
-
+          </section>
           {/* Project KPIs integrated into the MEP command center */}
           {dashboardProject && projectDashboardMetrics && (
             <section className="space-y-3">
@@ -1619,190 +1603,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               </div>
             </section>
           )}
-
-          {/* Row 1: Portefeuille MEP Donut + Points de vigilance */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Portefeuille MEP</h3>
-                  <p className="text-xs text-slate-500">Répartition par statut</p>
-                </div>
-                <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">
-                  Stockage local
-                </span>
-              </div>
-              <div className="flex flex-col sm:flex-row items-center gap-6 py-2">
-                <div
-                  className="w-36 h-36 rounded-full grid place-items-center relative shrink-0 bg-slate-100"
-                  style={dashboardStats.donutGradient ? { background: dashboardStats.donutGradient } : undefined}
-                >
-                  <div className="w-24 h-24 rounded-full bg-white flex flex-col items-center justify-center shadow-inner">
-                    <span className="text-2xl font-black text-slate-900 font-mono tabular-nums">
-                      {db.mep.length}
-                    </span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">MEP</span>
-                  </div>
-                </div>
-                <div className="flex-1 w-full space-y-2.5">
-                  {dashboardStats.statusCounts.length === 0 ? (
-                    <div className="text-xs text-slate-400 text-center py-6">Aucune MEP enregistrée</div>
-                  ) : (
-                    dashboardStats.statusCounts.map((item) => (
-                      <div key={item.status} className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2 text-slate-700 font-medium">
-                          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.color }} />
-                          <span>{item.status}</span>
-                        </div>
-                        <span className="font-bold font-mono tabular-nums text-slate-900">{item.count}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Points de vigilance</h3>
-                  <p className="text-xs text-slate-500">Retards, No-Go et priorités opérationnelles</p>
-                </div>
-                <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg">
-                  À surveiller
-                </span>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {dashboardStats.risks.length === 0 ? (
-                  <div className="text-xs text-slate-400 text-center py-8">Aucun point de vigilance identifié.</div>
-                ) : (
-                  dashboardStats.risks.slice(0, 5).map((x) => (
-                    <div key={x.id} className="py-2.5 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
-                          <AlertTriangle className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-900 truncate">{x.title}</div>
-                          <div className="text-[11px] text-slate-500">
-                            {getMepRef(x)} · {x.changeNumbers || 'Change non renseigné'}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-xs font-semibold text-rose-700 whitespace-nowrap shrink-0">
-                        {isLateMep(x) ? 'En retard' : x.goNoGo === 'NO-GO' ? 'NO-GO' : x.priority}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Row 2: Prochaines échéances + Avancement des tâches */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Prochaines échéances</h3>
-                  <p className="text-xs text-slate-500">MEP et tâches à venir</p>
-                </div>
-                <button
-                  onClick={() => setPage('planning')}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Tout voir</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {dashboardStats.nextDeadlines.length === 0 ? (
-                  <div className="text-xs text-slate-400 text-center py-8">Aucune échéance enregistrée.</div>
-                ) : (
-                  dashboardStats.nextDeadlines.map((item) => (
-                    <div key={`${item.label}-${item.id}`} className="py-2.5 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-900 truncate">{item.title}</div>
-                        <div className="text-[11px] text-slate-500">
-                          {item.label} · {item.ref} · {item.owner || 'Non affecté'}
-                        </div>
-                      </div>
-                      <span className="text-[11px] font-mono tabular-nums text-slate-600 whitespace-nowrap shrink-0">
-                        {fmtDate(item.date)}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Avancement des tâches</h3>
-                  <p className="text-xs text-slate-500">Progression du plan de production</p>
-                </div>
-                <button
-                  onClick={() => setPage('kanban')}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Ouvrir Kanban</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <div className="space-y-4 pt-2">
-                {dashboardStats.colCounts.map((c, idx) => {
-                  const pct = Math.round((c.count / dashboardStats.maxColCount) * 100);
-                  const barColors = ['bg-indigo-500', 'bg-sky-500', 'bg-amber-500', 'bg-emerald-500'];
-                  return (
-                    <div key={c.col} className="grid grid-cols-[100px_1fr_32px] items-center gap-3 text-xs">
-                      <span className="font-semibold text-slate-700">{c.col}</span>
-                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                        <div className={`h-full rounded-full ${barColors[idx]}`} style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="text-right font-mono tabular-nums font-bold text-slate-900">{c.count}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Row 3: MEP récemment modifiées */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">MEP récemment modifiées</h3>
-              <p className="text-xs text-slate-500">Dernières créations et mises à jour</p>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {dashboardStats.recentMeps.length === 0 ? (
-                <div className="text-xs text-slate-400 text-center py-6">Aucune activité récente.</div>
-              ) : (
-                dashboardStats.recentMeps.map((x) => (
-                  <div key={x.id} className="py-2.5 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-slate-900 truncate">{x.title}</div>
-                      <div className="text-[11px] text-slate-500">
-                        {getMepRef(x)} · {x.project} · Change {x.changeNumbers || '—'}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${getStatusBadgeClasses(x.status)}`}>
-                        {x.status}
-                      </span>
-                      <button
-                        onClick={() => openMepForm(x.id)}
-                        className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 cursor-pointer"
-                        title="Modifier"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
         </div>
       )}
 
