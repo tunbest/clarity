@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { AppUser, Project, PortfolioScope } from '../types';
 import { CommunicationAssistant } from './CommunicationAssistant';
+import { calculateProjectMetrics } from '../utils/pmCalculations';
 
 export type ProdPilotPage =
   | 'dashboard'
@@ -748,6 +749,20 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       maxColCount,
     };
   }, [db.mep, allTasks]);
+  
+  // Project KPIs are shown in the same production cockpit as MEP KPIs.
+  // Prefer the project selected in Clarity; otherwise use the project linked to the MEP portfolio.
+  const dashboardProject = useMemo(() => {
+    if (!projects.length) return undefined;
+    return projects.find((project) => project.id === activeProjectId)
+      || projects.find((project) => db.mep.some((mep) => mep.projectId === project.id));
+  }, [projects, activeProjectId, db.mep]);
+
+  const projectDashboardMetrics = useMemo(
+    () => dashboardProject ? calculateProjectMetrics(dashboardProject) : undefined,
+    [dashboardProject]
+  );
+
 
   // Filtered MEP table list
   const filteredMeps = useMemo(() => {
@@ -1548,6 +1563,59 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               <div className="text-[11px] text-slate-500 mt-1">Critiques, hautes ou en retard</div>
             </div>
           </div>
+
+          {/* Project KPIs integrated into the MEP command center */}
+          {dashboardProject && projectDashboardMetrics && (
+            <section className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-1">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Performance du projet associé</h3>
+                  <p className="text-xs text-slate-500">{dashboardProject.code} · {dashboardProject.name} — indicateurs projet et production réunis</p>
+                </div>
+                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${
+                  projectDashboardMetrics.healthStatus === 'HEALTHY'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : projectDashboardMetrics.healthStatus === 'WARNING'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}>
+                  Santé projet : {projectDashboardMetrics.healthScore}/100
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Avancement projet</div>
+                  <div className="mt-2 text-2xl font-black text-slate-900 tabular-nums">{projectDashboardMetrics.progressPercent}%</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${projectDashboardMetrics.progressPercent}%` }} /></div>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Performance délais (SPI)</div>
+                  <div className={`mt-2 text-2xl font-black tabular-nums ${projectDashboardMetrics.SPI >= 1 ? 'text-emerald-600' : 'text-amber-600'}`}>{projectDashboardMetrics.SPI.toFixed(2)}</div>
+                  <div className="mt-1 text-[10px] text-slate-500">{projectDashboardMetrics.SPI >= 1 ? 'Dans les délais' : 'Retard à surveiller'}</div>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Tâches projet</div>
+                  <div className="mt-2 text-2xl font-black text-slate-900 tabular-nums">{projectDashboardMetrics.completedTasks}<span className="text-sm font-semibold text-slate-400"> / {projectDashboardMetrics.totalTasks}</span></div>
+                  <div className="mt-1 text-[10px] text-slate-500">Terminées</div>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Tâches en retard</div>
+                  <div className={`mt-2 text-2xl font-black tabular-nums ${projectDashboardMetrics.overdueTasks ? 'text-rose-600' : 'text-slate-900'}`}>{projectDashboardMetrics.overdueTasks}</div>
+                  <div className="mt-1 text-[10px] text-slate-500">À traiter</div>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Risques critiques</div>
+                  <div className={`mt-2 text-2xl font-black tabular-nums ${projectDashboardMetrics.criticalRisksCount ? 'text-rose-600' : 'text-slate-900'}`}>{projectDashboardMetrics.criticalRisksCount}</div>
+                  <div className="mt-1 text-[10px] text-slate-500">Sur {projectDashboardMetrics.totalRisksCount} risques</div>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Jalons validés</div>
+                  <div className="mt-2 text-2xl font-black text-slate-900 tabular-nums">{projectDashboardMetrics.completedMilestones}<span className="text-sm font-semibold text-slate-400"> / {projectDashboardMetrics.totalMilestones}</span></div>
+                  <div className="mt-1 text-[10px] text-slate-500">Jalons du projet</div>
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* Row 1: Portefeuille MEP Donut + Points de vigilance */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
