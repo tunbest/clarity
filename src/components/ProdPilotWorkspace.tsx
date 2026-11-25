@@ -381,6 +381,17 @@ const getMepProgress = (m: MepEntry) => {
 
 const parseItsmNumbers = (value: unknown): string[] => Array.from(new Set(String(value || '').split(/[\n,;\s]+/).map((item) => item.trim().toUpperCase()).filter(Boolean)));
 
+const normalizeServiceNowUrl = (value: unknown): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
+};
+
 const normalizeItsmReferences = (value: unknown, changeNumbers: string, ritmNumbers: string): MepItsmReference[] => {
   const existing = Array.isArray(value) ? value : [];
   const byKey = new Map<string, MepItsmReference>();
