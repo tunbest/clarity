@@ -200,6 +200,7 @@ interface ProdPilotWorkspaceProps {
   scopes?: PortfolioScope[];
   activeProjectId?: string;
   onUpdateProject?: (project: Project) => void;
+  dashboardOnly?: boolean;
 }
 
 const MEP_STATUSES: MepStatus[] = [
@@ -513,6 +514,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   scopes = [],
   activeProjectId,
   onUpdateProject,
+  dashboardOnly = false,
 }) => {
   const [db, setDb] = useState<ProdPilotDb>({ mep: [], kanban: [] });
   const [mepLoaded, setMepLoaded] = useState(false);
@@ -1411,7 +1413,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   return (
     <div className="space-y-5">
       {/* Clarity-Styled ProdPilot Workspace Header & Navigation Strip */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-4">
+      {!dashboardOnly && <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center font-black shadow-sm shrink-0">
@@ -1487,7 +1489,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {/* =====================================================================
           1. DASHBOARD (VUE GÉNÉRALE)
@@ -1807,7 +1809,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       {/* =====================================================================
           2. MISES EN PRODUCTION (TABLE + FILTERS + CRUD)
          ===================================================================== */}
-      {page === 'mep' && (
+      {page === 'mep' && !dashboardOnly && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
