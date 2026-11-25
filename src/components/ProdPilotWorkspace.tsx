@@ -586,6 +586,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const [mepStatusFilter, setMepStatusFilter] = useState('');
   const [mepPriorityFilter, setMepPriorityFilter] = useState('');
   const [mepDateFilter, setMepDateFilter] = useState('');
+  const [mepGoNoGoFilter, setMepGoNoGoFilter] = useState('');
   const [kanbanProjectFilter, setKanbanProjectFilter] = useState('');
   const [minuteSearch, setMinuteSearch] = useState('');
   const [minuteProjectFilter, setMinuteProjectFilter] = useState('');
@@ -774,15 +775,29 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const matchQuery = !q || JSON.stringify(x).toLowerCase().includes(q);
       const matchStatus = !mepStatusFilter || x.status === mepStatusFilter;
       const matchPriority = !mepPriorityFilter || x.priority === mepPriorityFilter;
+      const matchGoNoGo = !mepGoNoGoFilter || x.goNoGo === mepGoNoGoFilter;
       const matchDate =
         !mepDateFilter ||
         (mepDateFilter === 'future' ? dayStr(x.date) >= today : dayStr(x.date) < today);
       // MEP view is a production register: do not silently hide entries because
       // the global project selector points to another project. Server-side RBAC
       // already limits the records returned by /api/meps for this user.
-      return matchQuery && matchStatus && matchPriority && matchDate;
+      return matchQuery && matchStatus && matchPriority && matchGoNoGo && matchDate;
     });
-  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepDateFilter]);
+  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepGoNoGoFilter, mepDateFilter]);
+
+  const mepControlStats = useMemo(() => {
+    const active = db.mep.filter((m) => !isClosedMep(m));
+    return {
+      total: db.mep.length,
+      active: active.length,
+      go: active.filter((m) => m.goNoGo === 'GO').length,
+      pending: active.filter((m) => m.goNoGo === 'En attente').length,
+      noGo: active.filter((m) => m.goNoGo === 'NO-GO').length,
+      late: active.filter(isLateMep).length,
+      atRisk: active.filter((m) => m.priority === 'Critique' || m.priority === 'Haute' || m.goNoGo === 'NO-GO' || isLateMep(m)).length,
+    };
+  }, [db.mep]);
 
   const selectedRunbookMep = db.mep.find((m) => m.id === selectedRunbookId) || null;
   const selectedRunbook = selectedRunbookMep ? normalizeRunbook(selectedRunbookMep.runbook, selectedRunbookMep.owner) : null;
@@ -1500,8 +1515,16 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
          ===================================================================== */}
       {page === 'mep' && !dashboardOnly && (
         <div className="space-y-4">
+          {/* Synthèse opérationnelle MEP */}
+          <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+            <button type="button" onClick={() => { setMepStatusFilter(''); setMepGoNoGoFilter(''); }} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-indigo-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">MEP actives</div><div className="mt-1 text-2xl font-black text-indigo-700 tabular-nums">{mepControlStats.active}</div><div className="text-[10px] text-slate-400">{mepControlStats.total} au total · Tout afficher</div></button>
+            <button type="button" onClick={() => setMepGoNoGoFilter('GO')} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-emerald-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">GO validés</div><div className="mt-1 text-2xl font-black text-emerald-700 tabular-nums">{mepControlStats.go}</div><div className="text-[10px] text-slate-400">Décision favorable</div></button>
+            <button type="button" onClick={() => setMepGoNoGoFilter('En attente')} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-amber-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">En attente</div><div className="mt-1 text-2xl font-black text-amber-700 tabular-nums">{mepControlStats.pending}</div><div className="text-[10px] text-slate-400">Décision à obtenir</div></button>
+            <button type="button" onClick={() => setMepGoNoGoFilter('NO-GO')} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-rose-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">NO-GO</div><div className="mt-1 text-2xl font-black text-rose-700 tabular-nums">{mepControlStats.noGo}</div><div className="text-[10px] text-slate-400">Décision bloquante</div></button>
+            <button type="button" onClick={() => { setMepGoNoGoFilter('NO-GO'); setMepPriorityFilter(''); }} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-orange-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">MEP à risque</div><div className="mt-1 text-2xl font-black text-orange-700 tabular-nums">{mepControlStats.atRisk}</div><div className="text-[10px] text-slate-400">{mepControlStats.late} en retard · Voir les risques</div></button>
+          </div>
           {/* Toolbar */}
-          <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             <div className="relative lg:col-span-2">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -1539,6 +1562,17 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
             </select>
 
             <select
+              value={mepGoNoGoFilter}
+              onChange={(e) => setMepGoNoGoFilter(e.target.value)}
+              className="text-xs px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 font-medium cursor-pointer"
+            >
+              <option value="">Tous les Go / No-Go</option>
+              <option value="En attente">En attente</option>
+              <option value="GO">GO</option>
+              <option value="NO-GO">NO-GO</option>
+            </select>
+
+            <select
               value={mepDateFilter}
               onChange={(e) => setMepDateFilter(e.target.value)}
               className="text-xs px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 font-medium cursor-pointer"
@@ -1564,13 +1598,14 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     <th className="p-3.5">Équipe</th>
                     <th className="p-3.5">Avancement</th>
                     <th className="p-3.5">Statut</th>
+                    <th className="p-3.5">Go / No-Go</th>
                     <th className="p-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredMeps.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-10 text-center text-slate-400">
+                      <td colSpan={11} className="p-10 text-center text-slate-400">
                         Aucune MEP correspondante. Programmez votre première mise en production.
                       </td>
                     </tr>
@@ -1631,6 +1666,10 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                             >
                               {x.status}
                             </span>
+                          </td>
+                          <td className="p-3.5 whitespace-nowrap">
+                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getStatusBadgeClasses(x.goNoGo)}`}>{x.goNoGo || 'En attente'}</span>
+                            {isLateMep(x) && <div className="mt-1 text-[10px] font-bold text-rose-600">En retard</div>}
                           </td>
                           <td className="p-3.5 text-right whitespace-nowrap space-x-1">
                             <button
