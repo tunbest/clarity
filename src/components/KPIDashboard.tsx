@@ -358,12 +358,7 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
             </div>
             <Calendar className="w-5 h-5 text-indigo-600"/>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
-              <span className="text-[11px] font-semibold uppercase text-slate-500">Indice de performance planning (SPI)</span>
-              <div className="text-3xl font-black text-slate-900 mt-2">{metrics.SPI}</div>
-              <span className={`inline-block mt-2 px-2 py-1 rounded-lg text-[10px] font-bold border ${getIndexColor(metrics.SPI,1)}`}>{metrics.SPI>=1?'En avance sur le planning':metrics.SPI>=0.9?'Léger retard':'Retard à traiter'}</span>
-            </div>
+          <div className="grid grid-cols-1 gap-4">
             <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
               <span className="text-[11px] font-semibold uppercase text-slate-500">Écart d'avancement vs planning</span>
               <div className={`text-3xl font-black mt-2 ${metrics.SV>=0?'text-emerald-600':'text-rose-600'}`}>{metrics.SV>0?'+':''}{metrics.SV} pts</div>
