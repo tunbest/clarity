@@ -576,7 +576,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   }, [clarityProjects, db.mep, mepLoaded]);
 
 
-  const [page, setPage] = useState<ProdPilotPage>(activeProjectId ? 'mep' : 'dashboard');
+  const [page, setPage] = useState<ProdPilotPage>('mep');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Filters
