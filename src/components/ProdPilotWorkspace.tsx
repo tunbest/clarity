@@ -342,7 +342,7 @@ const normalizeRunbook = (value: any, owner = ''): MepRunbook => {
       ];
       return base.prerequisites.map((defaultItem, index) => {
         const previous = selected[index] || {};
-        return { ...defaultItem, ...previous, id: defaultItem.id, title: defaultItem.title, reference: '', owner: '', status: 'À faire' as MepRunbookStatus };
+        return { ...defaultItem, ...previous, id: previous.id || defaultItem.id, title: defaultItem.title, reference: '', owner: '', status: 'À faire' as MepRunbookStatus };
       });
     })(),
     executionSteps: Array.isArray(value.executionSteps) ? value.executionSteps.map((x: any) => step(x, 'Étape opérationnelle')) : base.executionSteps,
