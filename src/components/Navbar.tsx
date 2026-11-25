@@ -131,7 +131,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       case 'CHEF_PROJET':
         return [
           { id: 'prod_releases', label: 'Pilotage MEP', icon: Rocket },
-          { id: 'dashboard', label: 'Dashboard projet + KPIs MEP', icon: LayoutDashboard },
+          { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
 
           { id: 'kanban', label: 'Tableau Kanban', icon: FolderKanban },
           { id: 'gantt', label: 'Planning & jalons', icon: Calendar },
