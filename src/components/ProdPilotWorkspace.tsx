@@ -576,7 +576,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   }, [clarityProjects, db.mep, mepLoaded]);
 
 
-  const [page, setPage] = useState<ProdPilotPage>('dashboard');
+  const [page, setPage] = useState<ProdPilotPage>('mep');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Filters
@@ -775,10 +775,12 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const matchDate =
         !mepDateFilter ||
         (mepDateFilter === 'future' ? dayStr(x.date) >= today : dayStr(x.date) < today);
-      const matchProject = !activeProjectId || x.projectId === activeProjectId;
-      return matchQuery && matchStatus && matchPriority && matchDate && matchProject;
+      // MEP view is a production register: do not silently hide entries because
+      // the global project selector points to another project. Server-side RBAC
+      // already limits the records returned by /api/meps for this user.
+      return matchQuery && matchStatus && matchPriority && matchDate;
     });
-  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepDateFilter, activeProjectId]);
+  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepDateFilter]);
 
   const selectedRunbookMep = db.mep.find((m) => m.id === selectedRunbookId) || null;
   const selectedRunbook = selectedRunbookMep ? normalizeRunbook(selectedRunbookMep.runbook, selectedRunbookMep.owner) : null;
