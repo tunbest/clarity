@@ -576,7 +576,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   }, [clarityProjects, db.mep, mepLoaded]);
 
 
-  const [page, setPage] = useState<ProdPilotPage>('mep');
+  const [page, setPage] = useState<ProdPilotPage>('dashboard');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Filters
@@ -1397,7 +1397,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   };
 
   const navItems: { id: ProdPilotPage; label: string; icon: any; badge?: string | number }[] = [
-    { id: 'dashboard', label: 'Vue générale', icon: LayoutDashboard },
+    { id: 'dashboard', label: 'Vue générale & KPIs', icon: LayoutDashboard },
     { id: 'mep', label: 'Mises en production', icon: Rocket, badge: db.mep.length },
     { id: 'kanban', label: 'Kanban', icon: FolderKanban },
     { id: 'planning', label: 'Planning & calendrier', icon: CalendarIcon },
