@@ -1399,8 +1399,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   };
 
   const navItems: { id: ProdPilotPage; label: string; icon: any; badge?: string | number }[] = [
-    { id: 'dashboard', label: 'Vue générale & KPIs', icon: LayoutDashboard },
-    { id: 'mep', label: 'Mises en production', icon: Rocket, badge: db.mep.length },
+    { id: 'mep', label: 'Vue générale, KPIs & MEP', icon: Rocket, badge: db.mep.length },
     { id: 'kanban', label: 'Kanban', icon: FolderKanban },
     { id: 'planning', label: 'Planning & calendrier', icon: CalendarIcon },
     { id: 'minutes', label: 'Comptes rendus & mails', icon: FileText },
@@ -1493,7 +1492,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       {/* =====================================================================
           1. DASHBOARD (VUE GÉNÉRALE)
          ===================================================================== */}
-      {page === 'dashboard' && (
+      {page === 'mep' && (
         <div className="space-y-6">
           {/* Welcome Banner */}
           <div className="bg-gradient-to-r from-indigo-50 via-white to-sky-50 border border-indigo-100 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
