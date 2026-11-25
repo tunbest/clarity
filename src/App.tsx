@@ -47,9 +47,9 @@ export type MainTab = 'DASHBOARD' | 'KANBAN' | 'GANTT' | 'TASKS' | 'RISKS' | 'TE
 const PROJECT_MANAGER_TABS: MainTab[] = ['PORTFOLIO', 'DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'];
 
 const ROLE_PERMITTED_TABS: Record<UserRole, MainTab[]> = {
-  ADMINISTRATEUR: ['ADMIN'],
-  DIRECTEUR_PROJETS: ['PORTFOLIO', 'DASHBOARD', 'RISKS', 'TEAM'],
-  PMO: ['PORTFOLIO', 'DASHBOARD', 'GANTT', 'TASKS', 'RISKS'],
+  ADMINISTRATEUR: ['ADMIN', 'PROD_RELEASES'],
+  DIRECTEUR_PROJETS: ['PORTFOLIO', 'DASHBOARD', 'RISKS', 'TEAM', 'PROD_RELEASES'],
+  PMO: ['PORTFOLIO', 'DASHBOARD', 'GANTT', 'TASKS', 'RISKS', 'PROD_RELEASES'],
   CHEF_PROJET: PROJECT_MANAGER_TABS,
   CHEF_PROJET_PROD: PROJECT_MANAGER_TABS,
   CONTRIBUTEUR: ['CONTRIBUTOR'],
@@ -557,7 +557,7 @@ export const App: React.FC = () => {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         
         {/* Profile 1: ADMINISTRATEUR - Exclusively Admin & Security Console */}
-        {currentUser.role === 'ADMINISTRATEUR' ? (
+        {currentUser.role === 'ADMINISTRATEUR' && activeTab !== 'PROD_RELEASES' ? (
           <AdminPage
             currentUser={currentUser}
                 onClose={() => {}}
