@@ -375,12 +375,8 @@ const getRunbookProgress = (runbook: MepRunbook) => {
 const getMepRef = (m: MepEntry) => m.ref || `MEP-${m.id.slice(-5)}`;
 
 const buildTeamsMeetingUrl = (mep: MepEntry): string => {
-  const runbook = normalizeRunbook(mep.runbook, mep.owner);
-  const datePart = dayStr(mep.date) || isoToday();
   const meetingStart = mep.teamsMeetingStart || shiftLocalDateTime(mep.date, -30);
   const meetingEnd = mep.teamsMeetingEnd || mep.date;
-  const startTime = String(meetingStart || '').slice(11, 16);
-  const endTime = String(meetingEnd || '').slice(11, 16);
   const toIso = (localDateTime: string) => {
     const parsed = new Date(localDateTime);
     return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
