@@ -599,6 +599,17 @@ export const App: React.FC = () => {
             )}
 
             {activeTab === 'DASHBOARD' && activeProject && (
+              <ProductionReleasePortal
+                currentUser={currentUser}
+                projects={projects}
+                scopes={scopes}
+                activeProjectId={activeProject.id}
+                onUpdateProject={handleUpdateProject}
+                dashboardOnly
+              />
+            )}
+
+            {activeTab === 'DASHBOARD' && activeProject && (
               <KPIDashboard
                 project={activeProject}
                 metrics={metrics || undefined}
@@ -610,17 +621,6 @@ export const App: React.FC = () => {
                 onOpenProjectSettings={() => setProjectModalState({ isOpen: true, project: activeProject })}
                 onChangeTab={handleTabChange}
                 onToggleMilestone={handleToggleMilestone}
-              />
-            )}
-
-            {activeTab === 'DASHBOARD' && activeProject && (
-              <ProductionReleasePortal
-                currentUser={currentUser}
-                projects={projects}
-                scopes={scopes}
-                activeProjectId={activeProject.id}
-                onUpdateProject={handleUpdateProject}
-                dashboardOnly
               />
             )}
 
