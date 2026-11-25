@@ -59,6 +59,7 @@ export type MepTaskStatus = 'À faire' | 'En cours' | 'En validation' | 'Bloqué
 export interface MepPerson {
   name: string;
   role: string;
+  email?: string;
 }
 
 export interface MepItsmReference {
@@ -362,6 +363,35 @@ const getRunbookProgress = (runbook: MepRunbook) => {
 };
 
 const getMepRef = (m: MepEntry) => m.ref || `MEP-${m.id.slice(-5)}`;
+
+const buildTeamsMeetingUrl = (mep: MepEntry): string => {
+  const runbook = normalizeRunbook(mep.runbook, mep.owner);
+  const datePart = dayStr(mep.date) || isoToday();
+  const fallbackStart = String(mep.date || '').slice(11, 16) || runbook.plannedStart || '13:00';
+  const startTime = runbook.plannedStart || fallbackStart;
+  const endTime = runbook.plannedEnd || '16:00';
+  const toIso = (time: string) => {
+    const parsed = new Date(`${datePart}T${time}:00`);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
+  };
+  const attendees = (mep.people || []).map((person) => String(person.email || '').trim()).filter((email) => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email));
+  const params = new URLSearchParams({
+    subject: `Point MEP ${getMepRef(mep)} — ${mep.title}`,
+    startTime: toIso(startTime),
+    endTime: toIso(endTime),
+    content: [
+      `MEP : ${getMepRef(mep)} — ${mep.title}`,
+      `Projet : ${mep.project}`,
+      `Responsable : ${mep.owner}`,
+      `Environnement : ${mep.environment}`,
+      `Change : ${mep.changeNumbers || 'À renseigner'}`,
+      `RITM : ${mep.ritmNumbers || 'À renseigner'}`,
+      mep.description || '',
+    ].filter(Boolean).join('\\n'),
+  });
+  if (attendees.length) params.set('attendees', attendees.join(';'));
+  return `https://teams.microsoft.com/l/meeting/new?${params.toString()}`;
+};
 const isClosedMep = (m: MepEntry) => ['Réussie', 'Échec', 'Annulée'].includes(m.status);
 const isLateMep = (m: MepEntry) => Boolean(m.date && dayStr(m.date) < isoToday() && !isClosedMep(m));
 
@@ -441,7 +471,7 @@ const normalizeMep = (x: any, projects: Project[]): MepEntry => {
     trigrams: Array.from(new Set((Array.isArray(x.trigrams) ? x.trigrams : String(x.runbook?.trigram || '').split(/[\n,; ]+/)).map((t: any) => String(t || '').trim().toUpperCase()).filter(Boolean))),
     rollback: String(x.rollback || ''),
     description: String(x.description || ''),
-    people: Array.isArray(x.people) ? x.people.map((p: any) => ({ name: String(p?.name || ''), role: String(p?.role || '') })) : [],
+    people: Array.isArray(x.people) ? x.people.map((p: any) => ({ name: String(p?.name || ''), role: String(p?.role || ''), email: String(p?.email || '') })) : [],
     tasks: Array.isArray(x.tasks) ? x.tasks.map(normalizeTask) : [],
     minutes: Array.isArray(x.minutes) ? x.minutes.map((m: any) => ({
       ...m, id: String(m?.id || uid('CR')), mepId: id, date: String(m?.date || isoToday()),
@@ -892,7 +922,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     const now = new Date().toISOString();
     const cleanPeople = personDraft
       .filter((p) => p.name.trim())
-      .map((p) => ({ name: p.name.trim(), role: (p.role || '').trim() }));
+      .map((p) => ({ name: p.name.trim(), role: (p.role || '').trim(), email: String(p.email || '').trim() }));
     const cleanTasks = taskDraft.map(normalizeTask);
     const cleanChanges = parseItsmNumbers(mepForm.changeNumbers || '');
     const cleanRitms = parseItsmNumbers(mepForm.ritmNumbers || '');
@@ -968,7 +998,29 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       persistDb({ ...db, mep: [newEntry, ...db.mep] });
     }
     setIsMepModalOpen(false);
-    showToast('MEP enregistrée — planning recalculé');
+    if (!editMepId) {
+      const createdMep = db.mep.length ? undefined : undefined;
+      const savedMep: MepEntry = {
+        id: mepId, ref: mepRef, projectId: (mepForm.projectId || '').trim(),
+        project: targetProject?.name || '', title: (mepForm.title || 'Nouvelle MEP').trim(),
+        version: (mepForm.version || '').trim(), date: mepForm.date || `${isoToday()}T22:00`,
+        owner: (mepForm.owner || currentUser.displayName || 'CPP').trim(),
+        environment: (mepForm.environment as any) || 'Production', status: (mepForm.status as MepStatus) || 'Brouillon',
+        priority: (mepForm.priority as any) || 'Normale', goNoGo: (mepForm.goNoGo as any) || 'En attente',
+        changeNumbers: cleanChanges.join(', '), ritmNumbers: cleanRitms.join(', '),
+        changeUrl: normalizeServiceNowUrl(mepForm.changeUrl), ritmUrl: normalizeServiceNowUrl(mepForm.ritmUrl),
+        itsmReferences, trigrams: (mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()),
+        rollback: (mepForm.rollback || '').trim(), description: (mepForm.description || '').trim(),
+        people: cleanPeople, tasks: cleanTasks, minutes: [], runbook: normalizeRunbook(mepForm.runbook, mepForm.owner || currentUser.displayName || ''),
+        createdAt: now, updatedAt: now,
+      };
+      const teamsUrl = buildTeamsMeetingUrl(savedMep);
+      const teamsWindow = window.open(teamsUrl, '_blank', 'noopener,noreferrer');
+      if (!teamsWindow) showToast('MEP enregistrée. Autorisez les fenêtres contextuelles pour ouvrir la réunion Teams.');
+      else showToast('MEP enregistrée — réunion Teams préparée avec les intervenants renseignés. Vérifiez puis envoyez l’invitation dans Teams.');
+    } else {
+      showToast('MEP mise à jour — planning recalculé');
+    }
   };
 
   const handleDeleteMep = (m: MepEntry) => {
