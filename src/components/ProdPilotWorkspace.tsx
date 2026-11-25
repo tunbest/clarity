@@ -381,17 +381,15 @@ const buildTeamsMeetingUrl = (mep: MepEntry): string => {
   const meetingEnd = mep.teamsMeetingEnd || mep.date;
   const startTime = String(meetingStart || '').slice(11, 16);
   const endTime = String(meetingEnd || '').slice(11, 16);
-  const startDate = dayStr(meetingStart) || datePart;
-  const endDate = dayStr(meetingEnd) || datePart;
-  const toIso = (time: string) => {
-    const parsed = new Date(`${datePart}T${time}:00`);
+  const toIso = (localDateTime: string) => {
+    const parsed = new Date(localDateTime);
     return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
   };
   const attendees = (mep.people || []).map((person) => String(person.email || '').trim()).filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
   const params = new URLSearchParams({
     subject: `Point MEP ${getMepRef(mep)} — ${mep.title}`,
-    startTime: toIso(startTime).replace(datePart, startDate),
-    endTime: toIso(endTime).replace(datePart, endDate),
+    startTime: toIso(meetingStart),
+    endTime: toIso(meetingEnd),
     content: [
       `MEP : ${getMepRef(mep)} — ${mep.title}`,
       `Projet : ${mep.project}`,
@@ -857,7 +855,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     setEditMepId(id);
     const existing = id ? db.mep.find((m) => m.id === id) : undefined;
     if (existing) {
-      setMepForm({ ...existing });
+      setMepForm({ ...existing, teamsMeetingStart: existing.teamsMeetingStart || shiftLocalDateTime(existing.date, -30), teamsMeetingEnd: existing.teamsMeetingEnd || existing.date });
       setPersonDraft((existing.people || []).map((p) => ({ ...p })));
       const baseTasks = (existing.tasks || []).map(normalizeTask);
       if (extraTask) {
