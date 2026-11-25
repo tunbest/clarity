@@ -1494,88 +1494,12 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       {/* =====================================================================
           1. DASHBOARD (VUE GÉNÉRALE)
          ===================================================================== */}
-      {page === 'mep' && dashboardOnly && (
-        <div className="space-y-5">
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-black text-slate-900">Indicateurs de production</h3>
-                <p className="text-xs text-slate-500">Vue immédiate des MEP à piloter et des alertes opérationnelles</p>
-              </div>
-              <span className="rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-bold text-indigo-700">{db.mep.length} MEP au total</span>
-            </div>
-          {/* 4 KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-bold text-indigo-700">
-                <span>MEP ouvertes</span>
-                <Rocket className="w-4 h-4 text-indigo-600" />
-              </div>
-              <div className="text-3xl font-black text-slate-900 font-mono tabular-nums mt-3">
-                {dashboardStats.activeCount}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Déploiements à piloter</div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-bold text-sky-700">
-                <span>MEP à venir</span>
-                <CalendarIcon className="w-4 h-4 text-sky-600" />
-              </div>
-              <div className="text-3xl font-black text-slate-900 font-mono tabular-nums mt-3">
-                {dashboardStats.upcomingCount}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Fenêtres planifiées</div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-bold text-amber-700">
-                <span>Tâches en retard</span>
-                <Clock className="w-4 h-4 text-amber-600" />
-              </div>
-              <div className="text-3xl font-black text-slate-900 font-mono tabular-nums mt-3">
-                {dashboardStats.lateTasksCount}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Jalons ou tâches à traiter</div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-bold text-rose-700">
-                <span>MEP à risque</span>
-                <AlertTriangle className="w-4 h-4 text-rose-600" />
-              </div>
-              <div className="text-3xl font-black text-slate-900 font-mono tabular-nums mt-3">
-                {dashboardStats.risks.length}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Critiques, hautes ou en retard</div>
-            </div>
-          </div>
-          </section>
-
-        </div>
-      )}
 
       {/* =====================================================================
           2. MISES EN PRODUCTION (TABLE + FILTERS + CRUD)
          ===================================================================== */}
       {page === 'mep' && !dashboardOnly && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-black text-slate-900">Registre des Mises en production</h3>
-              <p className="text-xs text-slate-500">
-                Une fiche MEP centralise le Change ServiceNow, les intervenants, les jalons et les tâches.
-              </p>
-            </div>
-            <button
-              onClick={() => openMepForm(null)}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Programmer une MEP</span>
-            </button>
-          </div>
-
           {/* Toolbar */}
           <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="relative lg:col-span-2">
