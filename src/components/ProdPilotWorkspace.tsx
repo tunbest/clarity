@@ -999,7 +999,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     }
     setIsMepModalOpen(false);
     if (!editMepId) {
-      const createdMep = db.mep.length ? undefined : undefined;
       const savedMep: MepEntry = {
         id: mepId, ref: mepRef, projectId: (mepForm.projectId || '').trim(),
         project: targetProject?.name || '', title: (mepForm.title || 'Nouvelle MEP').trim(),
@@ -1015,9 +1014,9 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         createdAt: now, updatedAt: now,
       };
       const teamsUrl = buildTeamsMeetingUrl(savedMep);
-      const teamsWindow = window.open(teamsUrl, '_blank', 'noopener,noreferrer');
-      if (!teamsWindow) showToast('MEP enregistrée. Autorisez les fenêtres contextuelles pour ouvrir la réunion Teams.');
-      else showToast('MEP enregistrée — réunion Teams préparée avec les intervenants renseignés. Vérifiez puis envoyez l’invitation dans Teams.');
+      const teamsWindow = window.open(teamsUrl, '_blank');
+      if (teamsWindow) teamsWindow.opener = null;
+      showToast(teamsWindow ? 'MEP enregistrée — réunion Teams préparée avec les intervenants renseignés. Vérifiez puis envoyez l’invitation dans Teams.' : 'MEP enregistrée. Autorisez les fenêtres contextuelles pour ouvrir la réunion Teams.');
     } else {
       showToast('MEP mise à jour — planning recalculé');
     }
@@ -3058,7 +3057,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h4 className="text-sm font-bold text-slate-900">Intervenants de la MEP</h4>
-                    <p className="text-xs text-slate-500">Ajoutez les personnes mobilisées et leur rôle.</p>
+                    <p className="text-xs text-slate-500">Ajoutez les personnes mobilisées, leur rôle et leur e-mail professionnel : elles seront proposées comme participants au point Teams.</p>
                   </div>
                   <button
                     type="button"
@@ -3076,7 +3075,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 ) : (
                   <div className="space-y-2">
                     {personDraft.map((p, i) => (
-                      <div key={i} className="grid grid-cols-[1fr_1fr_36px] gap-2">
+                      <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_36px] gap-2">
                         <input
                           type="text"
                           placeholder="Nom et prénom"
@@ -3095,6 +3094,17 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                           onChange={(e) => {
                             const next = [...personDraft];
                             next[i].role = e.target.value;
+                            setPersonDraft(next);
+                          }}
+                          className="text-xs p-2 rounded-xl border border-slate-300"
+                        />
+                        <input
+                          type="email"
+                          placeholder="E-mail professionnel (invitation Teams)"
+                          value={p.email || ''}
+                          onChange={(e) => {
+                            const next = [...personDraft];
+                            next[i].email = e.target.value;
                             setPersonDraft(next);
                           }}
                           className="text-xs p-2 rounded-xl border border-slate-300"
