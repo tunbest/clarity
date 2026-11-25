@@ -35,6 +35,18 @@ function getUserFromRequest(req: Request): AppUser {
   return user;
 }
 
+// Keep project visibility consistent across the workspace and MEP APIs.
+// Older projects may not have managerId; in that legacy case, fall back to
+// the recorded manager name. Never override an explicit, different managerId.
+function isProjectVisibleToUser(project: any, user: AppUser): boolean {
+  if (user.role !== 'CHEF_PROJET') return true;
+  const managerId = String(project?.managerId || '').trim();
+  if (managerId) return managerId === String(user.id);
+  const managerName = String(project?.managerName || '').trim().toLocaleLowerCase('fr');
+  const displayName = String(user.displayName || '').trim().toLocaleLowerCase('fr');
+  return Boolean(managerName && displayName && managerName === displayName);
+}
+
 // Remove legacy financial properties from old persisted projects and imported backups.
 const FINANCIAL_FIELD_PATTERN = /budget|cost|financial|currency|hourlyrate|dailyrate|tjm|^bac$|^pv$|^ev$|^ac$|^cv$|^cpi$|^eac$|^etc$|^vac$|^sv$/i;
 function stripFinancialFields(value: any): any {
@@ -363,7 +375,7 @@ app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
 app.get('/api/workspace', async (req: Request,res: Response) => {
   const pool=getPgPool()!; let r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');
   if(!r.rowCount){await pool.query('INSERT INTO workspace_state(id,projects,revision) VALUES(1,$1::jsonb,1) ON CONFLICT(id) DO NOTHING',[JSON.stringify(dbStore.getAllProjects())]);r=await pool.query('SELECT projects,revision,updated_at FROM workspace_state WHERE id=1');}
-  const actor=getUserFromRequest(req);const all:any[]=(r.rows[0].projects||[]).map(stripFinancialFields);const visible=actor.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===actor.id):all;
+  const actor=getUserFromRequest(req);const all:any[]=(r.rows[0].projects||[]).map(stripFinancialFields);const visible=all.filter((p:any)=>isProjectVisibleToUser(p,actor));
   res.json({success:true,projects:visible,revision:Number(r.rows[0].revision),updatedAt:r.rows[0].updated_at});
 });
 app.put('/api/workspace', async (req: Request,res: Response) => {
@@ -374,7 +386,7 @@ app.put('/api/workspace', async (req: Request,res: Response) => {
   const managerState=await pool.query("SELECT id FROM app_users WHERE role='CHEF_PROJET' AND disabled=FALSE");const activeManagerIds=new Set<string>(managerState.rows.map((u:any)=>String(u.id)));
   for(const project of submitted){const trigrams=Array.isArray(project.trigrams)?project.trigrams.map((v:any)=>String(v||'').trim().toUpperCase()):[];if(project.scopeId){const scope=scopeById.get(String(project.scopeId));if(!scope)return res.status(422).json({error:`Périmètre inexistant pour le projet ${project.code||project.id}.`});const allowed=new Set<string>((scope.trigrams||[]).map((v:any)=>String(v).toUpperCase()));if(trigrams.some((v:string)=>!allowed.has(v)))return res.status(422).json({error:`Un trigramme du projet ${project.code||project.id} n'appartient pas au périmètre sélectionné.`});}else if(trigrams.length)return res.status(422).json({error:'Un projet doit être rattaché à un périmètre pour utiliser des trigrammes.'});if(actor.role!=='CHEF_PROJET'&&project.managerId&&!activeManagerIds.has(String(project.managerId)))return res.status(422).json({error:`Le chef de projet affecté au projet ${project.code||project.id} est introuvable ou désactivé.`});}
   if(actor.role==='CHEF_PROJET'){
-    const owned=all.filter((p:any)=>p.managerId===actor.id);const submittedIds=new Set(submitted.map((p:any)=>String(p.id)));
+    const owned=all.filter((p:any)=>isProjectVisibleToUser(p,actor));const submittedIds=new Set(submitted.map((p:any)=>String(p.id)));
     if(submitted.some((p:any)=>{const old=all.find((x:any)=>x.id===p.id);return (old&&old.managerId!==actor.id)||(p.managerId&&p.managerId!==actor.id);}))return res.status(403).json({error:'Vous ne pouvez modifier que les projets qui vous sont attribués.'});
     const removed=owned.filter((p:any)=>!submittedIds.has(String(p.id)));const mr=await pool.query('SELECT meps FROM mep_workspace_state WHERE id=1');const meps:any[]=mr.rows[0]?.meps||[];
     const blocked=meps.filter((m:any)=>removed.some((p:any)=>p.id===m.projectId));if(blocked.length)return res.status(409).json({error:`Suppression refusée : ${blocked.length} MEP sont encore rattachées à un projet.`});
@@ -450,7 +462,7 @@ app.post('/api/workspace/import', async (req: Request, res: Response) => {
 // Central MEP repository: every MEP belongs to an existing Clarity project.
 app.get('/api/meps', async (req: Request, res: Response) => {
   const pool=getPgPool()!;const result=await pool.query('SELECT meps,revision,updated_at FROM mep_workspace_state WHERE id=1');const row=result.rows[0];let meps:any[]=row?.meps||[];const actor=getUserFromRequest(req);
-  if(actor.role==='CHEF_PROJET'){const w=await pool.query('SELECT projects FROM workspace_state WHERE id=1');const ids=new Set((w.rows[0]?.projects||[]).filter((p:any)=>p.managerId===actor.id).map((p:any)=>String(p.id)));meps=meps.filter((m:any)=>ids.has(String(m.projectId)));}
+  if(actor.role==='CHEF_PROJET'){const w=await pool.query('SELECT projects FROM workspace_state WHERE id=1');const ids=new Set((w.rows[0]?.projects||[]).filter((p:any)=>isProjectVisibleToUser(p,actor)).map((p:any)=>String(p.id)));meps=meps.filter((m:any)=>ids.has(String(m.projectId)));}
   res.json({success:true,meps,revision:Number(row?.revision||1),updatedAt:row?.updated_at||null});
 });
 app.put('/api/meps', async (req: Request, res: Response) => {
@@ -471,7 +483,7 @@ app.put('/api/meps', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const projects = await client.query('SELECT projects FROM workspace_state WHERE id=1 FOR SHARE');const actor=getUserFromRequest(req);const all:any[]=projects.rows[0]?.projects||[];const visible=actor.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===actor.id):all;const projectIds=new Set<string>(visible.map((p:any)=>String(p.id)));
+    const projects = await client.query('SELECT projects FROM workspace_state WHERE id=1 FOR SHARE');const actor=getUserFromRequest(req);const all:any[]=projects.rows[0]?.projects||[];const visible=all.filter((p:any)=>isProjectVisibleToUser(p,actor));const projectIds=new Set<string>(visible.map((p:any)=>String(p.id)));
     if(meps.some((m:any)=>!projectIds.has(String(m.projectId)))){await client.query('ROLLBACK');return res.status(403).json({error:'Vous ne pouvez gérer les MEP que des projets qui vous sont attribués.'});}
     const scopeResult=await client.query('SELECT scopes FROM portfolio_scope_state WHERE id=1');const scopes:any[]=scopeResult.rows[0]?.scopes||[];const projectById=new Map<string,any>(visible.map((p:any)=>[String(p.id),p] as [string,any]));
     for(const mep of meps){const project:any=projectById.get(String(mep.projectId));const scope=scopes.find((s:any)=>s.id===project?.scopeId);const allowed=new Set<string>((project?.trigrams?.length?project.trigrams:(scope?.trigrams||[])).map((v:string)=>String(v).toUpperCase()));const selected=Array.isArray(mep.trigrams)?mep.trigrams.map((v:any)=>String(v||'').trim().toUpperCase()).filter(Boolean):[];if(selected.some((v:string)=>!allowed.has(v))){await client.query('ROLLBACK');return res.status(422).json({error:`Un trigramme de la MEP ${mep.ref||mep.id} n'appartient pas au référentiel du projet.`});}}
@@ -687,14 +699,14 @@ app.get('/api/portfolio/summary', (req: Request, res: Response) => {
 
 // 3. Projects Endpoints (CRUD)
 app.get('/api/projects', (req: Request, res: Response) => {
-  const user=getUserFromRequest(req);const all=dbStore.getAllProjects().map(stripFinancialFields);const projects=user.role==='CHEF_PROJET'?all.filter((p:any)=>p.managerId===user.id):all;
+  const user=getUserFromRequest(req);const all=dbStore.getAllProjects().map(stripFinancialFields);const projects=all.filter((p:any)=>isProjectVisibleToUser(p,user));
   res.json({ success: true, count: projects.length, data: projects });
 });
 
 app.get('/api/projects/:id', (req: Request, res: Response) => {
   const project = dbStore.getProjectById(req.params.id);
   const user=getUserFromRequest(req);
-  if (user.role==='CHEF_PROJET' && (project as any)?.managerId!==user.id) return res.status(404).json({error:'Projet introuvable.'});
+  if (user.role==='CHEF_PROJET' && !project || user.role==='CHEF_PROJET' && !isProjectVisibleToUser(project,user)) return res.status(404).json({error:'Projet introuvable.'});
   if (!project) {
     return res.status(404).json({ error: 'Projet introuvable.' });
   }
