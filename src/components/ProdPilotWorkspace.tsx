@@ -167,6 +167,8 @@ export interface MepEntry {
   title: string;
   version: string;
   date: string;
+  teamsMeetingStart?: string;
+  teamsMeetingEnd?: string;
   owner: string;
   environment: 'Production' | 'Préproduction' | 'Recette';
   status: MepStatus;
@@ -229,6 +231,14 @@ const uid = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
 
 const dayStr = (s?: string) => String(s || '').slice(0, 10);
+
+const shiftLocalDateTime = (value: string, minutes: number): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  date.setMinutes(date.getMinutes() + minutes);
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
 
 const addDays = (dateStr: string, days: number) => {
   const d = new Date(`${dateStr}T12:00:00`);
@@ -367,9 +377,12 @@ const getMepRef = (m: MepEntry) => m.ref || `MEP-${m.id.slice(-5)}`;
 const buildTeamsMeetingUrl = (mep: MepEntry): string => {
   const runbook = normalizeRunbook(mep.runbook, mep.owner);
   const datePart = dayStr(mep.date) || isoToday();
-  const fallbackStart = String(mep.date || '').slice(11, 16) || runbook.plannedStart || '13:00';
-  const startTime = runbook.plannedStart || fallbackStart;
-  const endTime = runbook.plannedEnd || '16:00';
+  const meetingStart = mep.teamsMeetingStart || shiftLocalDateTime(mep.date, -30);
+  const meetingEnd = mep.teamsMeetingEnd || mep.date;
+  const startTime = String(meetingStart || '').slice(11, 16);
+  const endTime = String(meetingEnd || '').slice(11, 16);
+  const startDate = dayStr(meetingStart) || datePart;
+  const endDate = dayStr(meetingEnd) || datePart;
   const toIso = (time: string) => {
     const parsed = new Date(`${datePart}T${time}:00`);
     return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
@@ -377,8 +390,8 @@ const buildTeamsMeetingUrl = (mep: MepEntry): string => {
   const attendees = (mep.people || []).map((person) => String(person.email || '').trim()).filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
   const params = new URLSearchParams({
     subject: `Point MEP ${getMepRef(mep)} — ${mep.title}`,
-    startTime: toIso(startTime),
-    endTime: toIso(endTime),
+    startTime: toIso(startTime).replace(datePart, startDate),
+    endTime: toIso(endTime).replace(datePart, endDate),
     content: [
       `MEP : ${getMepRef(mep)} — ${mep.title}`,
       `Projet : ${mep.project}`,
@@ -854,12 +867,15 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       }
       setTaskDraft(baseTasks);
     } else {
+      const defaultMepDate = `${isoToday()}T22:00`;
       setMepForm({
         projectId: clarityProjects.find((p) => p.id === activeProjectId)?.id || clarityProjects[0]?.id || '',
         project: clarityProjects.find((p) => p.id === activeProjectId)?.name || clarityProjects[0]?.name || '',
         title: '',
         version: '',
-        date: `${isoToday()}T22:00`,
+        date: defaultMepDate,
+        teamsMeetingStart: shiftLocalDateTime(defaultMepDate, -30),
+        teamsMeetingEnd: defaultMepDate,
         owner: currentUser.displayName || '',
         environment: 'Production',
         status: 'Brouillon',
@@ -1003,6 +1019,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         id: mepId, ref: mepRef, projectId: (mepForm.projectId || '').trim(),
         project: targetProject?.name || '', title: (mepForm.title || 'Nouvelle MEP').trim(),
         version: (mepForm.version || '').trim(), date: mepForm.date || `${isoToday()}T22:00`,
+        teamsMeetingStart: mepForm.teamsMeetingStart || shiftLocalDateTime(mepForm.date || `${isoToday()}T22:00`, -30),
+        teamsMeetingEnd: mepForm.teamsMeetingEnd || mepForm.date || `${isoToday()}T22:00`,
         owner: (mepForm.owner || currentUser.displayName || 'CPP').trim(),
         environment: (mepForm.environment as any) || 'Production', status: (mepForm.status as MepStatus) || 'Brouillon',
         priority: (mepForm.priority as any) || 'Normale', goNoGo: (mepForm.goNoGo as any) || 'En attente',
@@ -2914,11 +2932,20 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     type="datetime-local"
                     required
                     value={mepForm.date || ''}
-                    onChange={(e) => setMepForm({ ...mepForm, date: e.target.value })}
+                    onChange={(e) => setMepForm({ ...mepForm, date: e.target.value, teamsMeetingStart: shiftLocalDateTime(e.target.value, -30), teamsMeetingEnd: e.target.value })}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
                 </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Début du point Teams</label>
+                  <input type="datetime-local" value={mepForm.teamsMeetingStart || ''} onChange={(e) => setMepForm({ ...mepForm, teamsMeetingStart: e.target.value })} className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono" />
+                  <p className="text-[10px] text-slate-500 mt-1">Par défaut : 30 minutes avant la MEP.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Fin du point Teams</label>
+                  <input type="datetime-local" value={mepForm.teamsMeetingEnd || ''} onChange={(e) => setMepForm({ ...mepForm, teamsMeetingEnd: e.target.value })} className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono" />
+                </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Responsable MEP *</label>
                   <input
