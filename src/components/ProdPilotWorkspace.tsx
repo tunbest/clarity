@@ -2946,15 +2946,15 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Lien ServiceNow du Change (facultatif)</label>
-                  <input
-                    type="url"
-                    value={mepForm.changeUrl || ''}
-                    onChange={(e) => setMepForm({ ...mepForm, changeUrl: e.target.value })}
-                    placeholder="https://instance.service-now.com/change_request.do?..."
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Lien(s) Change — un lien par numéro, dans le même ordre</label>
+                  <textarea
+                    rows={2}
+                    value={mepForm.changeUrls || mepForm.changeUrl || ''}
+                    onChange={(e) => setMepForm({ ...mepForm, changeUrls: e.target.value, changeUrl: e.target.value.split('\\n')[0] || '' })}
+                    placeholder="https://instance.service-now.com/change_request.do?sys_id=... (une URL par ligne)"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">Lien HTTPS direct vers le ticket Change.</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Le premier lien correspond au premier Change, le deuxième au deuxième, etc.</p>
                 </div>
 
                 <div>
@@ -2969,15 +2969,15 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Lien ServiceNow du RITM (facultatif)</label>
-                  <input
-                    type="url"
-                    value={mepForm.ritmUrl || ''}
-                    onChange={(e) => setMepForm({ ...mepForm, ritmUrl: e.target.value })}
-                    placeholder="https://instance.service-now.com/sc_req_item.do?..."
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Lien(s) RITM — un lien par numéro, dans le même ordre</label>
+                  <textarea
+                    rows={2}
+                    value={mepForm.ritmUrls || mepForm.ritmUrl || ''}
+                    onChange={(e) => setMepForm({ ...mepForm, ritmUrls: e.target.value, ritmUrl: e.target.value.split('\\n')[0] || '' })}
+                    placeholder="https://instance.service-now.com/sc_req_item.do?sys_id=... (une URL par ligne)"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">Lien HTTPS direct vers la demande RITM.</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Le premier lien correspond au premier RITM, le deuxième au deuxième, etc.</p>
                 </div>
 
                 <div className="sm:col-span-2">
