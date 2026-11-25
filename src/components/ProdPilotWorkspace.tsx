@@ -332,7 +332,19 @@ const normalizeRunbook = (value: any, owner = ''): MepRunbook => {
     pilotPhone: String(value.pilotPhone || ''), trigram: String(value.trigram || ''), applicationCode: String(value.applicationCode || ''),
     plannedStart: String(value.plannedStart || '13:00'), plannedEnd: String(value.plannedEnd || '16:00'),
     timelineScale: ['Auto',5,10,15,20,30,60,120].includes(value.timelineScale) ? value.timelineScale : 'Auto',
-    prerequisites: Array.isArray(value.prerequisites) ? value.prerequisites.map(item) : base.prerequisites,
+    prerequisites: (() => {
+      const saved = Array.isArray(value.prerequisites) ? value.prerequisites : [];
+      const selected = [
+        saved.find((x: any) => /cab/i.test(String(x?.title || ''))),
+        saved.find((x: any) => /pc de recette/i.test(String(x?.title || ''))),
+        saved.find((x: any) => /test.*préproduction/i.test(String(x?.title || ''))),
+        saved.find((x: any) => /prérequis techniques/i.test(String(x?.title || ''))),
+      ];
+      return base.prerequisites.map((defaultItem, index) => {
+        const previous = selected[index] || {};
+        return { ...defaultItem, ...previous, id: defaultItem.id, title: defaultItem.title, reference: '', owner: '', status: 'À faire' as MepRunbookStatus };
+      });
+    })(),
     executionSteps: Array.isArray(value.executionSteps) ? value.executionSteps.map((x: any) => step(x, 'Étape opérationnelle')) : base.executionSteps,
     dag: step(value.dag, 'Mise à jour du DAG'),
     rollbackEnabled: Boolean(value.rollbackEnabled), rollbackTriggered: Boolean(value.rollbackTriggered),
