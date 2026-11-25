@@ -2950,7 +2950,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   <textarea
                     rows={2}
                     value={mepForm.changeUrls || mepForm.changeUrl || ''}
-                    onChange={(e) => setMepForm({ ...mepForm, changeUrls: e.target.value, changeUrl: e.target.value.split('\\n')[0] || '' })}
+                    onChange={(e) => setMepForm({ ...mepForm, changeUrls: e.target.value, changeUrl: e.target.value.split(/\r?\n/)[0] || '' })}
                     placeholder="https://instance.service-now.com/change_request.do?sys_id=... (une URL par ligne)"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
@@ -2973,7 +2973,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   <textarea
                     rows={2}
                     value={mepForm.ritmUrls || mepForm.ritmUrl || ''}
-                    onChange={(e) => setMepForm({ ...mepForm, ritmUrls: e.target.value, ritmUrl: e.target.value.split('\\n')[0] || '' })}
+                    onChange={(e) => setMepForm({ ...mepForm, ritmUrls: e.target.value, ritmUrl: e.target.value.split(/\r?\n/)[0] || '' })}
                     placeholder="https://instance.service-now.com/sc_req_item.do?sys_id=... (une URL par ligne)"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
