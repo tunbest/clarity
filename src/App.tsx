@@ -613,6 +613,17 @@ export const App: React.FC = () => {
               />
             )}
 
+            {activeTab === 'DASHBOARD' && activeProject && (
+              <ProductionReleasePortal
+                currentUser={currentUser}
+                projects={projects}
+                scopes={scopes}
+                activeProjectId={activeProject.id}
+                onUpdateProject={handleUpdateProject}
+                dashboardOnly
+              />
+            )}
+
             {activeTab === 'KANBAN' && activeProject && (
               <KanbanBoard
                 project={activeProject}
