@@ -392,7 +392,7 @@ const normalizeServiceNowUrl = (value: unknown): string => {
   }
 };
 
-const normalizeItsmReferences = (value: unknown, changeNumbers: string, ritmNumbers: string): MepItsmReference[] => {
+const normalizeItsmReferences = (value: unknown, changeNumbers: string, ritmNumbers: string, changeUrls = '', ritmUrls = ''): MepItsmReference[] => {
   const existing = Array.isArray(value) ? value : [];
   const byKey = new Map<string, MepItsmReference>();
   existing.forEach((item: any) => {
@@ -401,9 +401,12 @@ const normalizeItsmReferences = (value: unknown, changeNumbers: string, ritmNumb
     if (!number) return;
     byKey.set(`${type}:${number}`, { id: String(item?.id || uid('ITSM')), type, number, status: String(item?.status || 'À vérifier'), serviceNowUrl: String(item?.serviceNowUrl || ''), source: 'MANUAL', updatedAt: String(item?.updatedAt || new Date().toISOString()) });
   });
-  [...parseItsmNumbers(changeNumbers).map((number) => ({ type: 'CHANGE' as const, number })), ...parseItsmNumbers(ritmNumbers).map((number) => ({ type: 'RITM' as const, number }))].forEach(({ type, number }) => {
+  const changeUrlList = String(changeUrls || '').split(/\n/).map((url) => normalizeServiceNowUrl(url));
+  const ritmUrlList = String(ritmUrls || '').split(/\n/).map((url) => normalizeServiceNowUrl(url));
+  [...parseItsmNumbers(changeNumbers).map((number, index) => ({ type: 'CHANGE' as const, number, url: changeUrlList[index] || '' })), ...parseItsmNumbers(ritmNumbers).map((number, index) => ({ type: 'RITM' as const, number, url: ritmUrlList[index] || '' }))].forEach(({ type, number, url }) => {
     const key = `${type}:${number}`;
-    if (!byKey.has(key)) byKey.set(key, { id: uid('ITSM'), type, number, status: 'À vérifier', serviceNowUrl: '', source: 'MANUAL', updatedAt: new Date().toISOString() });
+    const previous = byKey.get(key);
+    byKey.set(key, { id: previous?.id || uid('ITSM'), type, number, status: previous?.status || 'À vérifier', serviceNowUrl: url || previous?.serviceNowUrl || '', source: 'MANUAL', updatedAt: new Date().toISOString() });
   });
   return Array.from(byKey.values());
 };
@@ -429,7 +432,7 @@ const normalizeMep = (x: any, projects: Project[]): MepEntry => {
     ritmNumbers: parseItsmNumbers(x.ritmNumbers || '').join(', '),
     changeUrl: normalizeServiceNowUrl(x.changeUrl),
     ritmUrl: normalizeServiceNowUrl(x.ritmUrl),
-    itsmReferences: normalizeItsmReferences(x.itsmReferences, String(x.changeNumbers || x.changeRef || ''), String(x.ritmNumbers || '')),
+    itsmReferences: normalizeItsmReferences(x.itsmReferences, String(x.changeNumbers || x.changeRef || ''), String(x.ritmNumbers || ''), String(x.changeUrls || x.changeUrl || ''), String(x.ritmUrls || x.ritmUrl || '')),
     trigrams: Array.from(new Set((Array.isArray(x.trigrams) ? x.trigrams : String(x.runbook?.trigram || '').split(/[\n,; ]+/)).map((t: any) => String(t || '').trim().toUpperCase()).filter(Boolean))),
     rollback: String(x.rollback || ''),
     description: String(x.description || ''),
@@ -888,7 +891,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     const cleanTasks = taskDraft.map(normalizeTask);
     const cleanChanges = parseItsmNumbers(mepForm.changeNumbers || '');
     const cleanRitms = parseItsmNumbers(mepForm.ritmNumbers || '');
-    const itsmReferences = normalizeItsmReferences(mepForm.itsmReferences, cleanChanges.join(', '), cleanRitms.join(', '));
+    const itsmReferences = normalizeItsmReferences(mepForm.itsmReferences, cleanChanges.join(', '), cleanRitms.join(', '), mepForm.changeUrls || mepForm.changeUrl || '', mepForm.ritmUrls || mepForm.ritmUrl || '');
     const existingMep = db.mep.find((m) => m.id === editMepId);
     const mepId = existingMep?.id || uid('MEP');
     const mepRef = existingMep?.ref || `MEP-${mepId.slice(-5)}`;
@@ -912,6 +915,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               ritmNumbers: cleanRitms.join(', '),
               changeUrl: normalizeServiceNowUrl(mepForm.changeUrl),
               ritmUrl: normalizeServiceNowUrl(mepForm.ritmUrl),
+              changeUrls: String(mepForm.changeUrls || mepForm.changeUrl || ''),
+              ritmUrls: String(mepForm.ritmUrls || mepForm.ritmUrl || ''),
               itsmReferences,
               trigrams: Array.from(new Set((mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()).filter(Boolean))),
               projectId: (mepForm.projectId || '').trim(),
@@ -942,6 +947,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         ritmNumbers: cleanRitms.join(', '),
         changeUrl: normalizeServiceNowUrl(mepForm.changeUrl),
         ritmUrl: normalizeServiceNowUrl(mepForm.ritmUrl),
+        changeUrls: String(mepForm.changeUrls || mepForm.changeUrl || ''),
+        ritmUrls: String(mepForm.ritmUrls || mepForm.ritmUrl || ''),
         itsmReferences,
         trigrams: Array.from(new Set((mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()).filter(Boolean))),
         rollback: (mepForm.rollback || '').trim(),
