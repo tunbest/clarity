@@ -298,11 +298,10 @@ const createDefaultRunbook = (owner = ''): MepRunbook => ({
   type: 'Mineure', pilotPhone: '', trigram: '', applicationCode: '', plannedStart: '13:00', plannedEnd: '16:00',
   timelineScale: 'Auto',
   prerequisites: [
-    createRunbookItem("Présentation de l'opération au CAB"),
-    createRunbookItem('PC de recette / PV de recette'),
-    createRunbookItem('Tests scénario en préproduction'),
-    createRunbookItem('Montée en préproduction et contrôles'),
-    createRunbookItem('Validation des prérequis techniques'),
+    createRunbookItem('Validation CAB'),
+    createRunbookItem('PC de recette'),
+    createRunbookItem('Tests préproduction'),
+    createRunbookItem('Prérequis techniques'),
   ],
   executionSteps: [
     createExecutionStep('Préparation : ouverture Teams / mail / appel de pilotage'),
@@ -586,8 +585,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const [mepStatusFilter, setMepStatusFilter] = useState('');
   const [mepPriorityFilter, setMepPriorityFilter] = useState('');
   const [mepDateFilter, setMepDateFilter] = useState('');
-  const [mepGoNoGoFilter, setMepGoNoGoFilter] = useState('');
-  const [mepRiskOnlyFilter, setMepRiskOnlyFilter] = useState(false);
   const [kanbanProjectFilter, setKanbanProjectFilter] = useState('');
   const [minuteSearch, setMinuteSearch] = useState('');
   const [minuteProjectFilter, setMinuteProjectFilter] = useState('');
@@ -776,30 +773,15 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const matchQuery = !q || JSON.stringify(x).toLowerCase().includes(q);
       const matchStatus = !mepStatusFilter || x.status === mepStatusFilter;
       const matchPriority = !mepPriorityFilter || x.priority === mepPriorityFilter;
-      const matchGoNoGo = !mepGoNoGoFilter || x.goNoGo === mepGoNoGoFilter;
-      const matchRisk = !mepRiskOnlyFilter || x.priority === 'Critique' || x.priority === 'Haute' || x.goNoGo === 'NO-GO' || isLateMep(x);
       const matchDate =
         !mepDateFilter ||
         (mepDateFilter === 'future' ? dayStr(x.date) >= today : dayStr(x.date) < today);
       // MEP view is a production register: do not silently hide entries because
       // the global project selector points to another project. Server-side RBAC
       // already limits the records returned by /api/meps for this user.
-      return matchQuery && matchStatus && matchPriority && matchGoNoGo && matchRisk && matchDate;
+      return matchQuery && matchStatus && matchPriority && matchDate;
     });
-  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepGoNoGoFilter, mepRiskOnlyFilter, mepDateFilter]);
-
-  const mepControlStats = useMemo(() => {
-    const active = db.mep.filter((m) => !isClosedMep(m));
-    return {
-      total: db.mep.length,
-      active: active.length,
-      go: active.filter((m) => m.goNoGo === 'GO').length,
-      pending: active.filter((m) => m.goNoGo === 'En attente').length,
-      noGo: active.filter((m) => m.goNoGo === 'NO-GO').length,
-      late: active.filter(isLateMep).length,
-      atRisk: active.filter((m) => m.priority === 'Critique' || m.priority === 'Haute' || m.goNoGo === 'NO-GO' || isLateMep(m)).length,
-    };
-  }, [db.mep]);
+  }, [db.mep, mepSearch, mepStatusFilter, mepPriorityFilter, mepDateFilter]);
 
   const selectedRunbookMep = db.mep.find((m) => m.id === selectedRunbookId) || null;
   const selectedRunbook = selectedRunbookMep ? normalizeRunbook(selectedRunbookMep.runbook, selectedRunbookMep.owner) : null;
@@ -1517,16 +1499,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
          ===================================================================== */}
       {page === 'mep' && !dashboardOnly && (
         <div className="space-y-4">
-          {/* Synthèse opérationnelle MEP */}
-          <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
-            <button type="button" onClick={() => { setMepStatusFilter(''); setMepGoNoGoFilter(''); setMepRiskOnlyFilter(false); }} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-indigo-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">MEP actives</div><div className="mt-1 text-2xl font-black text-indigo-700 tabular-nums">{mepControlStats.active}</div><div className="text-[10px] text-slate-400">{mepControlStats.total} au total · Tout afficher</div></button>
-            <button type="button" onClick={() => setMepGoNoGoFilter('GO')} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-emerald-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">GO validés</div><div className="mt-1 text-2xl font-black text-emerald-700 tabular-nums">{mepControlStats.go}</div><div className="text-[10px] text-slate-400">Décision favorable</div></button>
-            <button type="button" onClick={() => setMepGoNoGoFilter('En attente')} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-amber-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">En attente</div><div className="mt-1 text-2xl font-black text-amber-700 tabular-nums">{mepControlStats.pending}</div><div className="text-[10px] text-slate-400">Décision à obtenir</div></button>
-            <button type="button" onClick={() => setMepGoNoGoFilter('NO-GO')} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-rose-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">NO-GO</div><div className="mt-1 text-2xl font-black text-rose-700 tabular-nums">{mepControlStats.noGo}</div><div className="text-[10px] text-slate-400">Décision bloquante</div></button>
-            <button type="button" onClick={() => { setMepGoNoGoFilter(''); setMepPriorityFilter(''); setMepRiskOnlyFilter(true); }} className="text-left bg-white rounded-xl border border-slate-200 p-3 hover:border-orange-300 transition-colors"><div className="text-[11px] font-semibold text-slate-500">MEP à risque</div><div className="mt-1 text-2xl font-black text-orange-700 tabular-nums">{mepControlStats.atRisk}</div><div className="text-[10px] text-slate-400">{mepControlStats.late} en retard · Voir les risques</div></button>
-          </div>
           {/* Toolbar */}
-          <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="relative lg:col-span-2">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -1564,17 +1538,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
             </select>
 
             <select
-              value={mepGoNoGoFilter}
-              onChange={(e) => setMepGoNoGoFilter(e.target.value)}
-              className="text-xs px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 font-medium cursor-pointer"
-            >
-              <option value="">Tous les Go / No-Go</option>
-              <option value="En attente">En attente</option>
-              <option value="GO">GO</option>
-              <option value="NO-GO">NO-GO</option>
-            </select>
-
-            <select
               value={mepDateFilter}
               onChange={(e) => setMepDateFilter(e.target.value)}
               className="text-xs px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 font-medium cursor-pointer"
@@ -1600,14 +1563,13 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     <th className="p-3.5">Équipe</th>
                     <th className="p-3.5">Avancement</th>
                     <th className="p-3.5">Statut</th>
-                    <th className="p-3.5">Go / No-Go</th>
                     <th className="p-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredMeps.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="p-10 text-center text-slate-400">
+                      <td colSpan={10} className="p-10 text-center text-slate-400">
                         Aucune MEP correspondante. Programmez votre première mise en production.
                       </td>
                     </tr>
@@ -1668,10 +1630,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                             >
                               {x.status}
                             </span>
-                          </td>
-                          <td className="p-3.5 whitespace-nowrap">
-                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getStatusBadgeClasses(x.goNoGo)}`}>{x.goNoGo || 'En attente'}</span>
-                            {isLateMep(x) && <div className="mt-1 text-[10px] font-bold text-rose-600">En retard</div>}
                           </td>
                           <td className="p-3.5 text-right whitespace-nowrap space-x-1">
                             <button
@@ -1764,22 +1722,30 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     <div className="rounded-xl bg-indigo-50 border border-indigo-100 p-3 text-xs text-indigo-800 flex items-center">{selectedRunbook.type==='Majeure'?'MEP majeure : la mise à jour du DAG est requise et entre dans le calcul.':'MEP mineure : l’étape DAG est affichée mais exclue de l’avancement.'}</div>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3"><div><h4 className="text-sm font-black text-slate-900">Destinataires des communications</h4><p className="text-xs text-slate-500">À / Cc pour les mails et participants Teams. Les coordonnées restent propres à cette MEP.</p></div><button onClick={()=>saveRunbook({recipients:[...selectedRunbook.recipients,{id:uid('REC'),name:'',email:'',information:false,sondes:false,start:false,end:false,teams:false,coproj:false,pss:false,to:true,cc:false}]})} className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold">+ Ajouter</button></div>
-                    <div className="overflow-x-auto"><table className="w-full text-xs min-w-[1120px]"><thead><tr className="text-left text-[10px] uppercase text-slate-500 border-b"><th className="p-2">Nom</th><th className="p-2">E-mail</th>{[['to','À'],['cc','Cc'],['information','Info'],['sondes','Sondes'],['start','Début'],['end','Fin'],['teams','Teams'],['coproj','COPROJ'],['pss','PSS / PSC']].map(([k,l])=><th key={k} className="p-2 text-center">{l}</th>)}<th /></tr></thead><tbody>{selectedRunbook.recipients.map(r=><tr key={r.id} className="border-b border-slate-100"><td className="p-1"><input value={r.name} onChange={e=>updateRunbookCollection('recipients',r.id,{name:e.target.value})} className="w-36 p-2 border rounded" /></td><td className="p-1"><input type="email" value={r.email} onChange={e=>updateRunbookCollection('recipients',r.id,{email:e.target.value})} className="w-56 p-2 border rounded" /></td>{(['to','cc','information','sondes','start','end','teams','coproj','pss'] as const).map(k=><td key={k} className="p-2 text-center"><input aria-label={k} type="checkbox" checked={r[k]} onChange={e=>updateRunbookCollection('recipients',r.id,{[k]:e.target.checked})} /></td>)}<td><button onClick={()=>saveRunbook({recipients:selectedRunbook.recipients.filter(x=>x.id!==r.id)})} className="text-rose-600 p-2"><X className="w-4 h-4"/></button></td></tr>)}</tbody></table></div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <label className="block text-xs font-bold text-slate-700">Destinataires principaux (À)
+                        <textarea rows={3} value={selectedRunbook.recipients.filter(r=>r.to).map(r=>r.email).filter(Boolean).join(', ')} onChange={e=>saveRunbook({recipients:[...selectedRunbook.recipients.filter(r=>!r.to&&!r.cc),{id:'recipients-to',name:'',email:e.target.value,information:false,sondes:false,start:false,end:false,teams:false,coproj:false,pss:false,to:true,cc:false},...selectedRunbook.recipients.filter(r=>r.cc).map(r=>({...r,to:false}))]})} placeholder="prenom.nom@entreprise.fr, equipe@entreprise.fr" className="mt-1 w-full p-3 border border-slate-300 rounded-lg font-normal" />
+                        <span className="mt-1 block text-[11px] font-normal text-slate-500">Adresses séparées par des virgules.</span>
+                      </label>
+                      <label className="block text-xs font-bold text-slate-700">Destinataires en copie (Cc)
+                        <textarea rows={3} value={selectedRunbook.recipients.filter(r=>r.cc).map(r=>r.email).filter(Boolean).join(', ')} onChange={e=>saveRunbook({recipients:[...selectedRunbook.recipients.filter(r=>!r.to&&!r.cc),...selectedRunbook.recipients.filter(r=>r.to).map(r=>({...r,cc:false})),{id:'recipients-cc',name:'',email:e.target.value,information:false,sondes:false,start:false,end:false,teams:false,coproj:false,pss:false,to:false,cc:true}]})} placeholder="manager@entreprise.fr, support@entreprise.fr" className="mt-1 w-full p-3 border border-slate-300 rounded-lg font-normal" />
+                        <span className="mt-1 block text-[11px] font-normal text-slate-500">Adresses séparées par des virgules.</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
               )}
               {runbookTab === 'prerequisites' && (
                 <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                  <div className="flex items-center justify-between"><div><h4 className="text-sm font-black text-slate-900">1 · Prérequis de l’opération</h4><p className="text-xs text-slate-500">Validation CAB, PC de recette, tests préproduction et prérequis techniques.</p></div><button onClick={()=>addRunbookItem('prerequisites')} className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold">+ Prérequis</button></div>
-                  <div className="space-y-2">{selectedRunbook.prerequisites.map((item,i)=><div key={item.id} className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_1fr_120px_32px] gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100 items-center"><div className="text-[10px] font-bold text-indigo-600">P{i+1}</div><input value={item.title} onChange={e=>updateRunbookCollection('prerequisites',item.id,{title:e.target.value})} placeholder="Prérequis" className="p-2 border rounded text-xs" /><input value={item.reference} onChange={e=>updateRunbookCollection('prerequisites',item.id,{reference:e.target.value})} placeholder="Référence" className="p-2 border rounded text-xs" /><input value={item.owner} onChange={e=>updateRunbookCollection('prerequisites',item.id,{owner:e.target.value})} placeholder="Responsable" className="p-2 border rounded text-xs" /><input type="datetime-local" value={item.startAt} onChange={e=>updateRunbookCollection('prerequisites',item.id,{startAt:e.target.value})} className="p-2 border rounded text-xs min-w-0" /><input type="datetime-local" value={item.endAt} onChange={e=>updateRunbookCollection('prerequisites',item.id,{endAt:e.target.value})} className="p-2 border rounded text-xs min-w-0" /><select value={item.status} onChange={e=>updateRunbookCollection('prerequisites',item.id,{status:e.target.value as MepRunbookStatus})} className="p-2 border rounded text-xs">{RUNBOOK_STATUSES.map(s=><option key={s}>{s}</option>)}</select><button onClick={()=>removeRunbookItem('prerequisites',item.id)} className="text-rose-600"><X className="w-4 h-4"/></button></div>)}</div>
+                  <div className="flex items-center justify-between"><div><h4 className="text-sm font-black text-slate-900">1 · Prérequis de l’opération</h4><p className="text-xs text-slate-500">Uniquement les dates de chaque prérequis.</p></div></div>
+                  <div className="space-y-2">{selectedRunbook.prerequisites.map((item,i)=><div key={item.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_1fr_1fr] gap-2 p-3 rounded-lg bg-slate-50 border border-slate-100 items-center"><div className="text-xs font-semibold text-slate-800">{item.title || `Prérequis ${i+1}`}</div><label className="text-[10px] font-semibold text-slate-500">Date de début<input type="date" value={item.startAt.slice(0,10)} onChange={e=>updateRunbookCollection('prerequisites',item.id,{startAt:e.target.value})} className="mt-1 w-full p-2 border rounded text-xs bg-white" /></label><label className="text-[10px] font-semibold text-slate-500">Date de fin<input type="date" value={item.endAt.slice(0,10)} onChange={e=>updateRunbookCollection('prerequisites',item.id,{endAt:e.target.value})} className="mt-1 w-full p-2 border rounded text-xs bg-white" /></label></div>)}</div>
                 </div>
               )}
               {runbookTab === 'execution' && (
                 <div className="space-y-4">
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                    <div className="flex items-center justify-between"><div><h4 className="text-sm font-black text-slate-900">2 · Étapes de l’opération</h4><p className="text-xs text-slate-500">Horodatage GO / FIN, acteur, référence, durée et statut.</p></div><button onClick={()=>addRunbookItem('executionSteps')} className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold">+ Étape</button></div>
-                    <div className="overflow-x-auto"><table className="w-full text-xs min-w-[1050px]"><thead><tr className="text-left text-[10px] uppercase text-slate-500 border-b"><th className="p-2">N°</th><th className="p-2">Étape</th><th className="p-2">Référence</th><th className="p-2">Acteur</th><th className="p-2">Début</th><th className="p-2">Fin</th><th className="p-2">Durée</th><th className="p-2">Statut</th><th className="p-2">Actions</th></tr></thead><tbody>{selectedRunbook.executionSteps.map((step,i)=>{const duration=step.startTime&&step.endTime?Math.round((new Date(`1970-01-01T${step.endTime}:00`).getTime()-new Date(`1970-01-01T${step.startTime}:00`).getTime())/60000):null;return <tr key={step.id} className="border-b border-slate-100"><td className="p-2 font-bold text-indigo-600">{i+1}</td><td className="p-1"><input value={step.title} onChange={e=>updateRunbookCollection('executionSteps',step.id,{title:e.target.value})} className="w-64 p-2 border rounded" /></td><td className="p-1"><input value={step.reference} onChange={e=>updateRunbookCollection('executionSteps',step.id,{reference:e.target.value})} placeholder="Référence / ticket" className="w-32 p-2 border rounded" /></td><td className="p-1"><input value={step.actor} onChange={e=>updateRunbookCollection('executionSteps',step.id,{actor:e.target.value})} placeholder="Acteur" className="w-36 p-2 border rounded" /></td><td className="p-1"><input type="time" value={step.startTime} onChange={e=>updateRunbookCollection('executionSteps',step.id,{startTime:e.target.value})} className="p-2 border rounded" /></td><td className="p-1"><input type="time" value={step.endTime} onChange={e=>updateRunbookCollection('executionSteps',step.id,{endTime:e.target.value})} className="p-2 border rounded" /></td><td className="p-2 font-mono">{duration===null?'—':duration<0?duration+1440:duration+' min'}</td><td className="p-1"><select value={step.status} onChange={e=>updateRunbookCollection('executionSteps',step.id,{status:e.target.value as MepRunbookStatus})} className="p-2 border rounded">{RUNBOOK_STATUSES.map(s=><option key={s}>{s}</option>)}</select></td><td className="p-1 whitespace-nowrap"><button onClick={()=>recordRunbookStep(step,'GO')} className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 font-bold mr-1">GO</button><button onClick={()=>recordRunbookStep(step,'FIN')} className="px-2 py-1 rounded bg-sky-50 text-sky-700 font-bold mr-1">FIN</button><button onClick={()=>removeRunbookItem('executionSteps',step.id)} className="p-1 text-rose-600"><X className="w-4 h-4"/></button></td></tr>})}</tbody></table></div>
+                    <div className="flex items-center justify-between"><div><h4 className="text-sm font-black text-slate-900">2 · Chronogramme de l’opération</h4><p className="text-xs text-slate-500">Étape, début, fin, statut et actions GO / FIN.</p></div><button onClick={()=>addRunbookItem('executionSteps')} className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold">+ Étape</button></div>
+                    <div className="overflow-x-auto"><table className="w-full text-xs min-w-[780px]"><thead><tr className="text-left text-[10px] uppercase text-slate-500 border-b"><th className="p-2">Étape</th><th className="p-2">Début</th><th className="p-2">Fin</th><th className="p-2">Statut</th><th className="p-2">Actions</th></tr></thead><tbody>{selectedRunbook.executionSteps.map(step=><tr key={step.id} className="border-b border-slate-100"><td className="p-1"><input value={step.title} onChange={e=>updateRunbookCollection('executionSteps',step.id,{title:e.target.value})} className="w-full min-w-56 p-2 border rounded" /></td><td className="p-1"><input type="time" value={step.startTime} onChange={e=>updateRunbookCollection('executionSteps',step.id,{startTime:e.target.value})} className="p-2 border rounded" /></td><td className="p-1"><input type="time" value={step.endTime} onChange={e=>updateRunbookCollection('executionSteps',step.id,{endTime:e.target.value})} className="p-2 border rounded" /></td><td className="p-1"><select value={step.status} onChange={e=>updateRunbookCollection('executionSteps',step.id,{status:e.target.value as MepRunbookStatus})} className="p-2 border rounded">{RUNBOOK_STATUSES.map(status=><option key={status}>{status}</option>)}</select></td><td className="p-1 whitespace-nowrap"><button onClick={()=>recordRunbookStep(step,'GO')} className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 font-bold mr-1">GO</button><button onClick={()=>recordRunbookStep(step,'FIN')} className="px-2 py-1 rounded bg-sky-50 text-sky-700 font-bold mr-1">FIN</button><button onClick={()=>removeRunbookItem('executionSteps',step.id)} className="p-1 text-rose-600"><X className="w-4 h-4"/></button></td></tr>)}</tbody></table></div>
                     <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-bold text-slate-700 mb-2">Frise horaire — fenêtre {selectedRunbook.plannedStart} à {selectedRunbook.plannedEnd} · pas {selectedRunbook.timelineScale==='Auto'?'automatique':selectedRunbook.timelineScale+' min'}</div><div className="space-y-2">{selectedRunbook.executionSteps.map((s,i)=><div key={s.id} className="grid grid-cols-[28px_1fr_120px] gap-2 items-center text-[11px]"><span className="font-mono text-slate-400">{i+1}</span><div className="min-w-0"><div className="font-semibold text-slate-700 truncate">{s.title}</div><div className="h-2 bg-slate-200 rounded-full relative overflow-hidden mt-1"><div className={`absolute top-0 bottom-0 rounded-full ${s.status==='KO'?'bg-rose-500':s.status==='OK'?'bg-emerald-500':s.status==='En cours'?'bg-sky-500':'bg-indigo-300'}`} style={getTimelineBarStyle(s,selectedRunbook)} /></div></div><span className="font-mono text-right text-slate-500">{s.startTime||'--:--'} → {s.endTime||'--:--'}</span></div>)}</div></div>
                   </div>
                 </div>
@@ -1788,15 +1754,15 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 <div className="space-y-4">
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3"><div><h4 className="text-sm font-black text-slate-900">3 · Fin d’opération — mise à jour du DAG</h4><p className="text-xs text-slate-500">{selectedRunbook.type==='Majeure'?'Étape obligatoire et incluse dans l’avancement global.':'Non requise pour une MEP mineure, exclue du calcul.'}</p></div><span className="text-xs font-bold text-slate-600">{selectedRunbook.type}</span></div>
-                    <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_120px] gap-2 items-center"><input value={selectedRunbook.dag.title} onChange={e=>saveRunbook({dag:{...selectedRunbook.dag,title:e.target.value}})} className="p-2 border rounded text-xs" /><input value={selectedRunbook.dag.actor} onChange={e=>saveRunbook({dag:{...selectedRunbook.dag,actor:e.target.value}})} placeholder="Acteur" className="p-2 border rounded text-xs" /><input type="time" value={selectedRunbook.dag.startTime} onChange={e=>saveRunbook({dag:{...selectedRunbook.dag,startTime:e.target.value}})} className="p-2 border rounded text-xs" /><div className="flex gap-1"><button onClick={()=>recordRunbookStep(selectedRunbook.dag,'GO','dag')} className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-bold">GO</button><button onClick={()=>recordRunbookStep(selectedRunbook.dag,'FIN','dag')} className="px-2 py-1 bg-sky-50 text-sky-700 rounded text-xs font-bold">FIN</button></div></div>
+                    <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 items-center"><input aria-label="Étape DAG" value={selectedRunbook.dag.title} onChange={e=>saveRunbook({dag:{...selectedRunbook.dag,title:e.target.value}})} className="p-2 border rounded text-xs" /><input aria-label="Début DAG" type="time" value={selectedRunbook.dag.startTime} onChange={e=>saveRunbook({dag:{...selectedRunbook.dag,startTime:e.target.value}})} className="p-2 border rounded text-xs" /><input aria-label="Fin DAG" type="time" value={selectedRunbook.dag.endTime} onChange={e=>saveRunbook({dag:{...selectedRunbook.dag,endTime:e.target.value}})} className="p-2 border rounded text-xs" /><select aria-label="Statut DAG" value={selectedRunbook.dag.status} onChange={e=>saveRunbook({dag:{...selectedRunbook.dag,status:e.target.value as MepRunbookStatus}})} className="p-2 border rounded text-xs">{RUNBOOK_STATUSES.map(status=><option key={status}>{status}</option>)}</select><div className="flex gap-1"><button onClick={()=>recordRunbookStep(selectedRunbook.dag,'GO','dag')} className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-bold">GO</button><button onClick={()=>recordRunbookStep(selectedRunbook.dag,'FIN','dag')} className="px-2 py-1 bg-sky-50 text-sky-700 rounded text-xs font-bold">FIN</button></div></div>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
                     <div className="flex items-center justify-between"><div><h4 className="text-sm font-black text-slate-900">4 · Plan de rollback</h4><p className="text-xs text-slate-500">Le plan est préparé mais exclu de l’avancement tant qu’il n’est pas déclenché.</p></div><label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={selectedRunbook.rollbackEnabled} onChange={e=>saveRunbook({rollbackEnabled:e.target.checked,rollbackTriggered:e.target.checked?selectedRunbook.rollbackTriggered:false})}/> Plan activé</label></div>
                     <div className="flex items-center justify-between flex-wrap gap-2"><span className={`px-3 py-1 rounded-full text-xs font-bold ${selectedRunbook.rollbackTriggered?'bg-rose-100 text-rose-700':'bg-amber-50 text-amber-800'}`}>{selectedRunbook.rollbackTriggered?'ROLLBACK DÉCLENCHÉ':'PLAN DE REPLI NON DÉCLENCHÉ'}</span><button disabled={!selectedRunbook.rollbackEnabled||selectedRunbook.rollbackTriggered} onClick={()=>saveRunbook({rollbackTriggered:true,events:[...selectedRunbook.events,{id:uid('EVT'),type:'ROLLBACK',actor:currentUser.displayName,at:new Date().toISOString(),comment:'Déclenchement du plan de repli'}].slice(-100)})} className="px-3 py-2 rounded-lg bg-rose-600 text-white text-xs font-bold disabled:opacity-40">Déclencher le rollback</button></div>
-                    {selectedRunbook.rollbackSteps.map((step,i)=><div key={step.id} className="grid grid-cols-1 md:grid-cols-[30px_2fr_1fr_1fr_1fr_110px_34px] gap-2 items-center p-2 bg-slate-50 rounded-lg"><span className="text-xs font-bold text-rose-600">R{i+1}</span><input value={step.title} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{title:e.target.value})} className="p-2 border rounded text-xs" /><input value={step.reference} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{reference:e.target.value})} placeholder="Référence" className="p-2 border rounded text-xs" /><input value={step.actor} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{actor:e.target.value})} placeholder="Acteur" className="p-2 border rounded text-xs" /><input type="time" value={step.startTime} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{startTime:e.target.value})} className="p-2 border rounded text-xs" /><select value={step.status} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{status:e.target.value as MepRunbookStatus})} className="p-2 border rounded text-xs">{RUNBOOK_STATUSES.map(s=><option key={s}>{s}</option>)}</select><button onClick={()=>removeRunbookItem('rollbackSteps',step.id)} className="text-rose-600"><X className="w-4 h-4"/></button></div>)}
+                    {selectedRunbook.rollbackSteps.map((step,i)=><div key={step.id} className="grid grid-cols-1 md:grid-cols-[30px_2fr_1fr_1fr_110px_auto] gap-2 items-center p-2 bg-slate-50 rounded-lg"><span className="text-xs font-bold text-rose-600">R{i+1}</span><input aria-label="Étape rollback" value={step.title} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{title:e.target.value})} className="p-2 border rounded text-xs" /><input aria-label="Début rollback" type="time" value={step.startTime} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{startTime:e.target.value})} className="p-2 border rounded text-xs" /><input aria-label="Fin rollback" type="time" value={step.endTime} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{endTime:e.target.value})} className="p-2 border rounded text-xs" /><select aria-label="Statut rollback" value={step.status} onChange={e=>updateRunbookCollection('rollbackSteps',step.id,{status:e.target.value as MepRunbookStatus})} className="p-2 border rounded text-xs">{RUNBOOK_STATUSES.map(status=><option key={status}>{status}</option>)}</select><div className="flex items-center gap-1"><button onClick={()=>recordRunbookStep(step,'GO','rollbackSteps')} className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-bold">GO</button><button onClick={()=>recordRunbookStep(step,'FIN','rollbackSteps')} className="px-2 py-1 bg-sky-50 text-sky-700 rounded text-xs font-bold">FIN</button><button onClick={()=>removeRunbookItem('rollbackSteps',step.id)} className="text-rose-600"><X className="w-4 h-4"/></button></div></div>)}
                     <button onClick={()=>addRunbookItem('rollbackSteps')} className="px-3 py-2 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold">+ Étape de rollback</button>
                   </div>
-                  <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2"><h4 className="text-sm font-black text-slate-900">Journal GO / FIN / Rollback</h4>{selectedRunbook.events.length===0?<p className="text-xs text-slate-400">Aucun événement enregistré.</p>:<div className="space-y-2">{[...selectedRunbook.events].reverse().map(ev=><div key={ev.id} className="flex flex-wrap justify-between gap-2 text-xs border-b border-slate-100 pb-2"><span className="font-bold text-slate-700">{ev.type} · {ev.stepTitle||ev.comment||'Événement de pilotage'} · {ev.actor}</span><time className="font-mono text-slate-500">{new Date(ev.at).toLocaleString('fr-FR')}</time></div>)}</div>}</div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2"><h4 className="text-sm font-black text-slate-900">Journal GO / FIN / Rollback</h4>{selectedRunbook.events.length===0?<p className="text-xs text-slate-400">Aucun événement enregistré.</p>:<div className="space-y-2">{[...selectedRunbook.events].reverse().map(ev=><div key={ev.id} className="flex flex-wrap justify-between gap-2 text-xs border-b border-slate-100 pb-2"><span className="font-bold text-slate-700">{ev.type} · {ev.stepTitle||ev.comment||'Événement de pilotage'}</span><time className="font-mono text-slate-500">{new Date(ev.at).toLocaleString('fr-FR')}</time></div>)}</div>}</div>
                 </div>
               )}
             </div>
