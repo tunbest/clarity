@@ -130,13 +130,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       case 'CHEF_PROJET_PROD':
       case 'CHEF_PROJET':
         return [
+          { id: 'prod_releases', label: 'Pilotage MEP', icon: Rocket },
           { id: 'dashboard', label: 'Tableau de bord & KPIs', icon: LayoutDashboard },
           { id: 'kanban', label: 'Tableau Kanban', icon: FolderKanban },
           { id: 'gantt', label: 'Planning & jalons', icon: Calendar },
           { id: 'tasks', label: 'Tâches & WBS', icon: ListTodo },
           { id: 'risks', label: 'Risques & alertes', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
           { id: 'team', label: 'Équipe & ressources', icon: Users },
-          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
       case 'CONTRIBUTEUR':
         return [
