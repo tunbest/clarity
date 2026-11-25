@@ -173,6 +173,8 @@ export interface MepEntry {
   goNoGo: 'En attente' | 'GO' | 'NO-GO';
   changeNumbers: string;
   ritmNumbers: string;
+  changeUrl?: string;
+  ritmUrl?: string;
   itsmReferences?: MepItsmReference[];
   trigrams?: string[];
   rollback: string;
@@ -2899,7 +2901,19 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                   />
                 </div>
 
-                <div className="sm:col-span-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Lien ServiceNow du Change (facultatif)</label>
+                  <input
+                    type="url"
+                    value={mepForm.changeUrl || ''}
+                    onChange={(e) => setMepForm({ ...mepForm, changeUrl: e.target.value })}
+                    placeholder="https://instance.service-now.com/change_request.do?..."
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Lien HTTPS direct vers le ticket Change.</p>
+                </div>
+
+                <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Référence(s) RITM (facultatif)</label>
                   <textarea
                     rows={2}
@@ -2908,6 +2922,18 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     placeholder="Une référence par ligne : RITM0112450, RITM0112451"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
                   />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Lien ServiceNow du RITM (facultatif)</label>
+                  <input
+                    type="url"
+                    value={mepForm.ritmUrl || ''}
+                    onChange={(e) => setMepForm({ ...mepForm, ritmUrl: e.target.value })}
+                    placeholder="https://instance.service-now.com/sc_req_item.do?..."
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Lien HTTPS direct vers la demande RITM.</p>
                 </div>
 
                 <div className="sm:col-span-2">
