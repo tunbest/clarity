@@ -392,6 +392,11 @@ const normalizeServiceNowUrl = (value: unknown): string => {
   }
 };
 
+const getItsmNumberUrl = (mep: MepEntry, type: 'CHANGE' | 'RITM', number: string): string => {
+  const ref = (mep.itsmReferences || []).find((item) => item.type === type && item.number === number);
+  return normalizeServiceNowUrl(ref?.serviceNowUrl) || normalizeServiceNowUrl(type === 'CHANGE' ? mep.changeUrl : mep.ritmUrl);
+};
+
 const normalizeItsmReferences = (value: unknown, changeNumbers: string, ritmNumbers: string, changeUrls = '', ritmUrls = ''): MepItsmReference[] => {
   const existing = Array.isArray(value) ? value : [];
   const byKey = new Map<string, MepItsmReference>();
