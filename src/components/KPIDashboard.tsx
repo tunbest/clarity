@@ -32,7 +32,8 @@ import {
   Plus, 
   Layers, 
   Sliders,
-  ChevronRight
+  ChevronRight,
+  Rocket
 } from 'lucide-react';
 
 interface DashboardMep {
