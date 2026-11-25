@@ -983,6 +983,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         title: (mepForm.title || 'Nouvelle MEP').trim(),
         version: (mepForm.version || '').trim(),
         date: mepForm.date || `${isoToday()}T22:00`,
+        teamsMeetingStart: mepForm.teamsMeetingStart || shiftLocalDateTime(mepForm.date || `${isoToday()}T22:00`, -30),
+        teamsMeetingEnd: mepForm.teamsMeetingEnd || mepForm.date || `${isoToday()}T22:00`,
         owner: (mepForm.owner || currentUser.displayName || 'CPP').trim(),
         environment: (mepForm.environment as any) || 'Production',
         status: (mepForm.status as MepStatus) || 'Brouillon',
