@@ -108,6 +108,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       case 'ADMINISTRATEUR':
         return [
           { id: 'admin', label: 'Console d’Administration & Sécurité', icon: ShieldCheck },
+          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
       case 'DIRECTEUR_PROJETS':
         return [
@@ -115,6 +116,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           { id: 'dashboard', label: 'Tableau de Bord Stratégique & KPIs', icon: LayoutDashboard },
           { id: 'risks', label: 'Matrice des Risques Portefeuille', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
           { id: 'workload', label: 'Charge & Capacité des Équipes', icon: Users },
+          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
       case 'PMO':
         return [
@@ -123,6 +125,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           { id: 'gantt', label: 'Jalons Stratégiques & Délais', icon: Calendar },
           { id: 'tasks', label: 'Audit WBS & Livrables', icon: ListTodo },
           { id: 'risks', label: 'Revue des Risques & Alertes', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
+          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
         ];
       case 'CHEF_PROJET_PROD':
       case 'CHEF_PROJET':
