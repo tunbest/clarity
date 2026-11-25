@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   Project, 
   ProjectMetrics, 
@@ -34,6 +34,15 @@ import {
   Sliders,
   ChevronRight
 } from 'lucide-react';
+
+interface DashboardMep {
+  id: string;
+  date?: string;
+  status?: string;
+  priority?: string;
+  goNoGo?: string;
+  tasks?: Array<{ offset?: number; duration?: number; status?: string }>;
+}
 
 interface KPIDashboardProps {
   project: Project;
@@ -86,6 +95,39 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
     totalMilestones: project?.milestones?.length || 0,
   };
 
+
+  const [mepEntries, setMepEntries] = useState<DashboardMep[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/meps', { credentials: 'include' })
+      .then((response) => {
+        if (!response.ok) throw new Error('Chargement des indicateurs MEP impossible');
+        return response.json();
+      })
+      .then((payload) => {
+        if (!cancelled) setMepEntries(Array.isArray(payload?.meps) ? payload.meps : []);
+      })
+      .catch((error) => console.error('Dashboard MEP:', error));
+    return () => { cancelled = true; };
+  }, []);
+
+  const mepStats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dateOnly = (value?: string) => String(value || '').slice(0, 10);
+    const active = mepEntries.filter((m) => !['Réussie', 'Échec', 'Annulée'].includes(String(m.status || '')));
+    const upcoming = active.filter((m) => dateOnly(m.date) >= today.toISOString().slice(0, 10));
+    const lateTasks = mepEntries.flatMap((m) => (m.tasks || []).map((task) => {
+      const start = new Date(dateOnly(m.date) + 'T00:00:00');
+      start.setDate(start.getDate() + (Number(task.offset) || 0) + Math.max(0, (Number(task.duration) || 1) - 1));
+      return { task, end: start };
+    })).filter(({ task, end }) => task.status !== 'Terminé' && !Number.isNaN(end.getTime()) && end < today);
+    const atRisk = active.filter((m) => ['Critique', 'Haute'].includes(String(m.priority || ''))
+      || String(m.goNoGo || '') === 'NO-GO'
+      || (dateOnly(m.date) !== '' && dateOnly(m.date) < today.toISOString().slice(0, 10)));
+    return { open: active.length, upcoming: upcoming.length, lateTasks: lateTasks.length, atRisk: atRisk.length };
+  }, [mepEntries]);
 
   // Status donut data
   const tasks = project?.tasks || [];
@@ -287,6 +329,22 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
 
         </div>
       </div>
+
+      {/* Production indicators — displayed immediately after the project KPI ribbon */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        {[
+          { label: 'MEP ouvertes', value: mepStats.open, detail: 'Déploiements à piloter', tone: 'indigo' },
+          { label: 'MEP à venir', value: mepStats.upcoming, detail: 'Fenêtres planifiées', tone: 'sky' },
+          { label: 'Tâches en retard', value: mepStats.lateTasks, detail: 'Jalons ou tâches à traiter', tone: 'amber' },
+          { label: 'MEP à risque', value: mepStats.atRisk, detail: 'Critiques, hautes ou en retard', tone: 'rose' },
+        ].map((item) => (
+          <div key={item.label} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
+            <div className="text-xs font-bold text-slate-600">{item.label}</div>
+            <div className="mt-2 text-3xl font-black text-slate-900 tabular-nums">{item.value}</div>
+            <div className="mt-1 text-[11px] text-slate-500">{item.detail}</div>
+          </div>
+        ))}
+      </section>
 
       {/* Main Charts & Indicators Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
