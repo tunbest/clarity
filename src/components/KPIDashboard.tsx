@@ -258,7 +258,7 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
         </div>
 
         {/* Project Health Score Ribbon */}
-        <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           
           {/* Health Score */}
           <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-200/60">
@@ -327,6 +327,19 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
             </span>
           </div>
 
+          <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-200/60">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase">Écart d'avancement vs planning</span>
+              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+            </div>
+            <div className={`text-2xl font-black mt-1.5 ${metrics.SV >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {metrics.SV > 0 ? '+' : ''}{metrics.SV} pts
+            </div>
+            <div className="text-[10px] text-slate-500 mt-1">
+              Début : {formatDateFR(project.startDate)} · Fin prévue : {formatDateFR(project.endDate)}
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -346,92 +359,26 @@ export const KPIDashboard: React.FC<KPIDashboardProps> = ({
         ))}
       </section>
 
-      {/* Main Charts & Indicators Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-        {/* Planning & delivery indicators */}
-        <div className="lg:col-span-8 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Respect du planning</h2>
-              <p className="text-xs text-slate-500 mt-1">Suivi de l'avancement par rapport à la période prévue du projet</p>
-            </div>
-            <Calendar className="w-5 h-5 text-indigo-600"/>
+      {/* MEP and task distribution */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <div><h2 className="text-base font-bold text-slate-900">Répartition des MEP</h2><p className="text-xs text-slate-500 mt-1">Vue des mises en production par statut</p></div>
+            <Rocket className="w-5 h-5 text-indigo-600" />
           </div>
-          <div className="grid grid-cols-1 gap-4">
-            <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
-              <span className="text-[11px] font-semibold uppercase text-slate-500">Écart d'avancement vs planning</span>
-              <div className={`text-3xl font-black mt-2 ${metrics.SV>=0?'text-emerald-600':'text-rose-600'}`}>{metrics.SV>0?'+':''}{metrics.SV} pts</div>
-              <span className="text-[10px] text-slate-500 mt-2 block">Début : {formatDateFR(project.startDate)} · Fin prévue : {formatDateFR(project.endDate)}</span>
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="flex justify-between text-xs mb-1"><span className="font-semibold text-slate-600">Avancement réalisé</span><strong>{metrics.progressPercent}%</strong></div>
-            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-600 rounded-full" style={{width:`${metrics.progressPercent}%`}}/></div>
-          </div>
+          {(() => {
+            const palette = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#94A3B8'];
+            const counts = mepEntries.reduce<Record<string, number>>((acc, mep) => { const status = String(mep.status || 'Non renseigné'); acc[status] = (acc[status] || 0) + 1; return acc; }, {});
+            const data = Object.entries(counts).map(([name, value], index) => ({ name, value, color: palette[index % palette.length] }));
+            return data.length ? <><div className="h-44 w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="value">{data.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div><div className="space-y-2 mt-2 pt-3 border-t border-slate-100">{data.map((item) => <div key={item.name} className="flex items-center justify-between text-xs"><span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />{item.name}</span><strong>{item.value}</strong></div>)}</div></> : <div className="h-52 flex items-center justify-center text-sm text-slate-400">Aucune MEP enregistrée</div>;
+          })()}
         </div>
-
-        {/* Task Status & Priority Breakdown (4-col) */}
-        <div className="lg:col-span-4 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-base font-bold text-slate-900">
-                Répartition des Tâches
-              </h2>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                {metrics.totalTasks} tâches
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 mb-4">
-              {metrics.completedTasks} terminées • {metrics.inProgressTasks} actives • {metrics.overdueTasks} en retard
-            </p>
-
-            <div className="h-44 w-full relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={75}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {pieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#1E293B', borderRadius: '8px', border: 'none', color: '#F8FAFC', fontSize: '11px' }} 
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-xl font-black text-slate-800">{metrics.progressPercent}%</span>
-                <span className="text-[10px] text-slate-400 font-medium uppercase">Complété</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2 mt-2 pt-3 border-t border-slate-100">
-            {pieData.map((item) => (
-              <div key={item.name} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-slate-600 font-medium">{item.name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <strong className="text-slate-800">{item.value}</strong>
-                  <span className="text-slate-400 text-[11px]">
-                    ({Math.round((item.value / (metrics.totalTasks || 1)) * 100)}%)
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
+          <div><div className="flex items-center justify-between mb-2"><h2 className="text-base font-bold text-slate-900">Répartition des Tâches</h2><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">{metrics.totalTasks} tâches</span></div>
+          <p className="text-xs text-slate-500 mb-4">{metrics.completedTasks} terminées • {metrics.inProgressTasks} actives • {metrics.overdueTasks} en retard</p>
+          <div className="h-44 w-full relative"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={3} dataKey="value">{pieData.map((entry, index) => <Cell key={"cell-" + index} fill={entry.color} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer><div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"><span className="text-xl font-black text-slate-800">{metrics.progressPercent}%</span><span className="text-[10px] text-slate-400 font-medium uppercase">Complété</span></div></div></div>
+          <div className="space-y-2 mt-2 pt-3 border-t border-slate-100">{pieData.map((item) => <div key={item.name} className="flex items-center justify-between text-xs"><span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />{item.name}</span><strong>{item.value} ({Math.round((item.value / (metrics.totalTasks || 1)) * 100)}%)</strong></div>)}</div>
         </div>
-
       </div>
 
       {/* Second Row: Milestones Roadmap & Team Workload */}
