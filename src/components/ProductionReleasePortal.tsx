@@ -8,6 +8,7 @@ interface ProductionReleasePortalProps {
   scopes?: PortfolioScope[];
   activeProjectId?: string;
   onUpdateProject?: (project: Project) => void;
+  dashboardOnly?: boolean;
 }
 
 class ProductionReleaseErrorBoundary extends React.Component<
@@ -45,10 +46,11 @@ export const ProductionReleasePortal: React.FC<ProductionReleasePortalProps> = (
   scopes = [],
   activeProjectId,
   onUpdateProject,
+  dashboardOnly = false,
 }) => {
   return (
     <ProductionReleaseErrorBoundary>
-      <ProdPilotWorkspace currentUser={currentUser} projects={projects} scopes={scopes} activeProjectId={activeProjectId} onUpdateProject={onUpdateProject} />
+      <ProdPilotWorkspace currentUser={currentUser} projects={projects} scopes={scopes} activeProjectId={activeProjectId} onUpdateProject={onUpdateProject} dashboardOnly={dashboardOnly} />
     </ProductionReleaseErrorBoundary>
   );
 };
