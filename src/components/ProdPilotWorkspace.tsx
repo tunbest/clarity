@@ -374,7 +374,7 @@ const buildTeamsMeetingUrl = (mep: MepEntry): string => {
     const parsed = new Date(`${datePart}T${time}:00`);
     return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
   };
-  const attendees = (mep.people || []).map((person) => String(person.email || '').trim()).filter((email) => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email));
+  const attendees = (mep.people || []).map((person) => String(person.email || '').trim()).filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
   const params = new URLSearchParams({
     subject: `Point MEP ${getMepRef(mep)} — ${mep.title}`,
     startTime: toIso(startTime),
@@ -387,7 +387,7 @@ const buildTeamsMeetingUrl = (mep: MepEntry): string => {
       `Change : ${mep.changeNumbers || 'À renseigner'}`,
       `RITM : ${mep.ritmNumbers || 'À renseigner'}`,
       mep.description || '',
-    ].filter(Boolean).join('\\n'),
+    ].filter(Boolean).join('\n'),
   });
   if (attendees.length) params.set('attendees', attendees.join(';'));
   return `https://teams.microsoft.com/l/meeting/new?${params.toString()}`;
