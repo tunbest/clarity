@@ -786,6 +786,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       goNoGo: 'En attente',
       changeNumbers: '',
       ritmNumbers: '',
+      changeUrl: '',
+      ritmUrl: '',
       itsmReferences: [],
       trigrams: [],
       tasks: (source.tasks || []).map((task) => ({ ...task, id: uid('TASK'), status: 'À faire', projectTaskId: undefined, projectMilestoneId: undefined })),
