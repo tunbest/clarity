@@ -753,10 +753,10 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   // Project KPIs are shown in the same production cockpit as MEP KPIs.
   // Prefer the project selected in Clarity; otherwise use the project linked to the MEP portfolio.
   const dashboardProject = useMemo(() => {
-    if (!projects.length) return undefined;
-    return projects.find((project) => project.id === activeProjectId)
-      || projects.find((project) => db.mep.some((mep) => mep.projectId === project.id));
-  }, [projects, activeProjectId, db.mep]);
+    if (!clarityProjects.length) return undefined;
+    return clarityProjects.find((project) => project.id === activeProjectId)
+      || clarityProjects.find((project) => db.mep.some((mep) => mep.projectId === project.id));
+  }, [clarityProjects, activeProjectId, db.mep]);
 
   const projectDashboardMetrics = useMemo(
     () => dashboardProject ? calculateProjectMetrics(dashboardProject) : undefined,
