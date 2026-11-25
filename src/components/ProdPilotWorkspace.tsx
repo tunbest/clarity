@@ -1807,9 +1807,20 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                             </div>
                           </td>
                           <td className="p-3.5">
-                            <div className="font-mono font-semibold text-sky-700">{x.changeNumbers || '—'}</div>
+                            <div className="flex flex-wrap gap-x-2 gap-y-1 font-mono font-semibold text-sky-700">
+                              {parseItsmNumbers(x.changeNumbers || '').length ? parseItsmNumbers(x.changeNumbers || '').map((number) => {
+                                const url = getItsmNumberUrl(x, 'CHANGE', number);
+                                return url ? <a key={number} href={url} target="_blank" rel="noopener noreferrer" title={`Ouvrir le Change ${number} dans ServiceNow`} className="underline hover:text-indigo-700">{number}</a> : <span key={number}>{number}</span>;
+                              }) : '—'}
+                            </div>
                             {x.ritmNumbers && (
-                              <div className="text-[11px] font-mono text-slate-500">RITM : {x.ritmNumbers}</div>
+                              <div className="text-[11px] font-mono text-slate-500 flex flex-wrap gap-x-2 gap-y-1">
+                                <span>RITM :</span>
+                                {parseItsmNumbers(x.ritmNumbers).map((number) => {
+                                  const url = getItsmNumberUrl(x, 'RITM', number);
+                                  return url ? <a key={number} href={url} target="_blank" rel="noopener noreferrer" title={`Ouvrir le RITM ${number} dans ServiceNow`} className="underline hover:text-indigo-700">{number}</a> : <span key={number}>{number}</span>;
+                                })}
+                              </div>
                             )}
                           </td>
                           <td className="p-3.5 font-mono tabular-nums text-slate-700 whitespace-nowrap">
