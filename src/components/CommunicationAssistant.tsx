@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Copy, Mail, FileText, ClipboardPaste, Upload, Download, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Copy, Mail, FileText, ClipboardPaste, Upload, Download, CheckCircle2, AlertTriangle, Users, Mic, Square, Pause, Play, AudioLines } from 'lucide-react';
 import { Project, PortfolioScope } from '../types';
 import { updateCoproJTemplate } from '../utils/coproJPowerPoint';
 
@@ -29,6 +29,13 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [manualRecipients, setManualRecipients] = useState('');
   const [manualCcRecipients, setManualCcRecipients] = useState('');
   const [transcript, setTranscript] = useState('');
+  const [captureState, setCaptureState] = useState<'idle' | 'recording' | 'paused' | 'ready'>('idle');
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [captureSeconds, setCaptureSeconds] = useState(0);
+  const captureStreamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const captureTimerRef = useRef<number | null>(null);
   const [draft, setDraft] = useState<DraftContent>({ subject: '', body: '' });
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState<'info' | 'success' | 'warning'>('info');
@@ -61,6 +68,82 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       : activeRecipients.filter((recipient) => categoryForMode(mode, recipient));
     setSelectedRecipientIds(eligible.map((recipient) => recipient.id));
   }, [selectedMepId, selectedProjectId, selectedScopeId, mode, meps, projects, scopes]);
+
+  const stopCaptureTimer = () => { if (captureTimerRef.current !== null) { window.clearInterval(captureTimerRef.current); captureTimerRef.current = null; } };
+  const startAudioCapture = async () => {
+    try {
+      if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === 'undefined') {
+        throw new Error('La capture audio nécessite Edge à jour et un contexte HTTPS.');
+      }
+      setAudioBlob(null);
+      setCaptureSeconds(0);
+      audioChunksRef.current = [];
+      setMessage('Sélectionnez l’onglet Teams ou la fenêtre Teams, puis activez « Partager l’audio ».');
+      setNotice('info');
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const audioTracks = displayStream.getAudioTracks();
+      if (!audioTracks.length) {
+        displayStream.getTracks().forEach((track) => track.stop());
+        throw new Error('Aucune piste audio reçue. Recommencez et cochez « Partager l’audio » dans Edge.');
+      }
+      captureStreamRef.current = displayStream;
+      const audioOnlyStream = new MediaStream(audioTracks);
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunksRef.current.push(event.data); };
+      recorder.onerror = () => { setMessage('Erreur pendant la capture audio. Vérifiez les autorisations Edge.'); setNotice('warning'); };
+      recorder.onstop = () => {
+        stopCaptureTimer();
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        if (blob.size > 0) { setAudioBlob(blob); setCaptureState('ready'); setMessage('Capture terminée. Le fichier audio est prêt à être téléchargé.'); setNotice('success'); }
+        else { setCaptureState('idle'); setMessage('Aucun audio n’a été enregistré.'); setNotice('warning'); }
+        captureStreamRef.current?.getTracks().forEach((track) => track.stop());
+        captureStreamRef.current = null;
+        recorderRef.current = null;
+      };
+      displayStream.getVideoTracks().forEach((track) => track.addEventListener('ended', () => {
+        if (recorder.state !== 'inactive') recorder.stop();
+      }, { once: true }));
+      recorder.start(1000);
+      setCaptureState('recording');
+      setMessage('Capture en cours. Le son de l’onglet ou de la fenêtre partagé est enregistré.');
+      setNotice('info');
+      captureTimerRef.current = window.setInterval(() => setCaptureSeconds((seconds) => seconds + 1), 1000);
+    } catch (error: any) {
+      if (error?.name === 'NotAllowedError') { setMessage('Capture annulée ou autorisation refusée dans Edge.'); }
+      else { setMessage(error?.message || 'Impossible de démarrer la capture audio.'); }
+      setNotice('warning');
+    }
+  };
+  const pauseAudioCapture = () => {
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    if (recorder.state === 'recording') {
+      recorder.pause(); stopCaptureTimer(); setCaptureState('paused'); setMessage('Capture mise en pause.'); setNotice('info');
+    } else if (recorder.state === 'paused') {
+      recorder.resume(); setCaptureState('recording'); setMessage('Capture reprise.'); setNotice('info');
+      captureTimerRef.current = window.setInterval(() => setCaptureSeconds((seconds) => seconds + 1), 1000);
+    }
+  };
+  const stopAudioCapture = () => {
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+  };
+  const downloadAudioCapture = () => {
+    if (!audioBlob) return;
+    const url = URL.createObjectURL(audioBlob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'clarity-coproj-reunion-' + new Date().toISOString().replace(/[:.]/g, '-') + '.webm';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  useEffect(() => () => {
+    stopCaptureTimer();
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
+    captureStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   const createDraft = () => {
     if (mode === 'coproj' && !selectedScope) { setMessage('Sélectionnez un périmètre contenant vos projets.'); setNotice('warning'); return; }
@@ -287,10 +370,23 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       </div>
       {mode === 'coproj' ? (
         <div className="space-y-4">
+        <div className="border border-sky-200 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><AudioLines className="w-4 h-4 text-sky-700" /> Capture audio de la réunion Teams</div>
+          <p className="text-[11px] text-slate-600">Dans Edge, choisissez l’onglet Teams ou sa fenêtre et cochez « Partager l’audio ». Clarity enregistre uniquement la piste audio, pas la vidéo.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {captureState === 'idle' || captureState === 'ready' ? <button type="button" onClick={startAudioCapture} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold flex items-center gap-2"><Mic className="w-4 h-4" /> Démarrer la capture</button> : <>
+              <button type="button" onClick={pauseAudioCapture} className="px-3 py-2 rounded-lg bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-2">{captureState === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}{captureState === 'paused' ? 'Reprendre' : 'Pause'}</button>
+              <button type="button" onClick={stopAudioCapture} className="px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-2"><Square className="w-4 h-4" /> Arrêter</button>
+            </>}
+            {audioBlob && <button type="button" onClick={downloadAudioCapture} className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Télécharger l’audio</button>}
+            <span className="text-xs text-slate-500">{captureState === 'recording' ? '● Enregistrement' : captureState === 'paused' ? 'En pause' : captureState === 'ready' ? 'Audio prêt' : 'En attente'} · {Math.floor(captureSeconds / 60).toString().padStart(2, '0')}:{(captureSeconds % 60).toString().padStart(2, '0')}</span>
+          </div>
+          <p className="text-[11px] text-amber-800 bg-amber-50 rounded-lg p-2">La capture dépend de l’option audio proposée par Edge et du partage autorisé par Teams. Prévenez les participants et respectez les règles de consentement applicables. Le fichier reste dans le navigateur jusqu’à son téléchargement ; aucun envoi automatique n’est effectué.</p>
+        </div>
         <div className="border border-indigo-200 rounded-xl p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><ClipboardPaste className="w-4 h-4 text-indigo-600" /> Notes / transcription Teams Facilitator</div>
-          <p className="text-[11px] text-slate-500">Copiez les notes depuis le récapitulatif Teams Facilitator et collez-les directement ci-dessous.</p>
-          <textarea rows={8} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez ici les notes Facilitator : synthèse, décisions, actions, responsables et échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><ClipboardPaste className="w-4 h-4 text-indigo-600" /> Transcription / notes de réunion</div>
+          <p className="text-[11px] text-slate-500">Collez ici la transcription Teams Facilitator ou une transcription obtenue localement à partir de l’enregistrement audio.</p>
+          <textarea rows={8} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez la transcription : échanges, décisions, actions, responsables et échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <label className="text-xs font-bold text-slate-700 space-y-1">RAID consolidé (modifiable)
