@@ -161,8 +161,11 @@ export interface MepRunbook {
 export interface MepEntry {
   id: string;
   ref?: string;
-  projectId: string;
-  project: string;
+  /** Legacy project linkage retained only for backward compatibility. */
+  projectId?: string;
+  project?: string;
+  applicationCode?: string;
+  scopeIds?: string[];
   title: string;
   version: string;
   date: string;
@@ -471,8 +474,10 @@ const normalizeMep = (x: any, projects: Project[]): MepEntry => {
     ...x,
     id,
     ref: String(x.ref || ''),
-    projectId: project?.id || x.projectId || '',
-    project: project?.name || x.project || 'Projet non classé',
+    projectId: x.projectId || '',
+    project: x.project || project?.name || '',
+    applicationCode: String(x.applicationCode || x.runbook?.applicationCode || ''),
+    scopeIds: Array.from(new Set((Array.isArray(x.scopeIds) ? x.scopeIds : []).map((id: any) => String(id || '').trim()).filter(Boolean))),
     title: String(x.title || 'Nouvelle mise en production'),
     version: String(x.version || ''),
     date: String(x.date || isoToday()),
@@ -891,9 +896,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     } else {
       const defaultMepDate = `${isoToday()}T22:00`;
       setMepForm({
-        projectId: clarityProjects.find((p) => p.id === activeProjectId)?.id || clarityProjects[0]?.id || '',
-        project: clarityProjects.find((p) => p.id === activeProjectId)?.name || clarityProjects[0]?.name || '',
-        title: '',
+        projectId: '', project: '', applicationCode: '', scopeIds: [],
+        title: ''
         version: '',
         date: defaultMepDate,
         teamsMeetingStart: shiftLocalDateTime(defaultMepDate, -30),
@@ -956,7 +960,12 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
 
   const handleSaveMep = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mepForm.projectId || !clarityProjects.some((p) => p.id === mepForm.projectId)) { showToast('Sélectionnez un projet Clarity existant.'); return; }
+    if (!(mepForm.title || '').trim()) { showToast('Renseignez le nom de l’application.'); return; }
+    const selectedScopes = Array.from(new Set((mepForm.scopeIds || []).filter((id) => scopes.some((scope) => scope.id === id))));
+    if (!selectedScopes.length) { showToast('Sélectionnez au moins un périmètre applicatif.'); return; }
+    const allowedTrigrams = new Set(scopes.filter((scope) => selectedScopes.includes(scope.id)).flatMap((scope) => scope.trigrams || []).map((value) => String(value).trim().toUpperCase()));
+    const selectedTrigrams = Array.from(new Set((mepForm.trigrams || []).map((value) => String(value).trim().toUpperCase()).filter((value) => value && allowedTrigrams.has(value))));
+    if (!selectedTrigrams.length) { showToast('Sélectionnez au moins un trigramme appartenant aux périmètres choisis.'); return; }
     const now = new Date().toISOString();
     const cleanPeople = personDraft
       .filter((p) => p.name.trim())
@@ -991,9 +1000,10 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               changeUrls: String(mepForm.changeUrls || mepForm.changeUrl || ''),
               ritmUrls: String(mepForm.ritmUrls || mepForm.ritmUrl || ''),
               itsmReferences,
-              trigrams: Array.from(new Set((mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()).filter(Boolean))),
-              projectId: (mepForm.projectId || '').trim(),
-              project: clarityProjects.find((p) => p.id === mepForm.projectId)?.name || '',
+              trigrams: selectedTrigrams,
+              projectId: '', project: '',
+              applicationCode: String(mepForm.applicationCode || '').trim(),
+              scopeIds: selectedScopes,
               people: cleanPeople,
               tasks: cleanTasks,
               runbook: normalizeRunbook(mepForm.runbook || m.runbook, mepForm.owner || m.owner),
@@ -1006,8 +1016,9 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const newEntry: MepEntry = {
         id: mepId,
         ref: mepRef,
-        projectId: (mepForm.projectId || '').trim(),
-        project: clarityProjects.find((p) => p.id === mepForm.projectId)?.name || '',
+        projectId: '', project: '',
+        applicationCode: String(mepForm.applicationCode || '').trim(),
+        scopeIds: selectedScopes,
         title: (mepForm.title || 'Nouvelle MEP').trim(),
         version: (mepForm.version || '').trim(),
         date: mepForm.date || `${isoToday()}T22:00`,
@@ -1025,7 +1036,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         changeUrls: String(mepForm.changeUrls || mepForm.changeUrl || ''),
         ritmUrls: String(mepForm.ritmUrls || mepForm.ritmUrl || ''),
         itsmReferences,
-        trigrams: Array.from(new Set((mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()).filter(Boolean))),
+        trigrams: selectedTrigrams,
         rollback: (mepForm.rollback || '').trim(),
         description: (mepForm.description || '').trim(),
         people: cleanPeople,
