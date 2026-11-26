@@ -265,6 +265,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         </div>
       </div>
       {mode === 'coproj' ? (
+        <div className="space-y-4">
         <div className="border border-indigo-200 rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><ClipboardPaste className="w-4 h-4 text-indigo-600" /> Notes / transcription Teams Copilot</div>
           <div className="flex flex-wrap items-center gap-3">
