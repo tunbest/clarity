@@ -38,7 +38,6 @@ export type ProdPilotPage =
   | 'dashboard'
   | 'mep'
   | 'planning'
-  | 'coproj'
   | 'minutes'
   | 'settings';
 
@@ -1312,7 +1311,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const navItems: { id: ProdPilotPage; label: string; icon: any; badge?: string | number }[] = [
     { id: 'mep', label: 'Registre des MEP', icon: Rocket, badge: db.mep.length },
     { id: 'planning', label: 'Planning & calendrier', icon: CalendarIcon },
-    { id: 'coproj', label: 'COPROJ – Synthèse périmètre', icon: FileText },
     { id: 'minutes', label: 'Comptes rendus & mails', icon: FileText },
     { id: 'settings', label: 'Paramètres & sauvegarde', icon: Settings },
   ];
@@ -1845,12 +1843,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       {/* =====================================================================
           5. COMPTES RENDUS
          ===================================================================== */}
-      {page === 'coproj' && (
-        <div className="space-y-4">
-          <CommunicationAssistant projects={clarityProjects} meps={db.mep} scopes={scopes} allowedModes={['coproj']} initialMode="coproj" />
-        </div>
-      )}
-
       {page === 'minutes' && (
         <div className="space-y-4">
           <CommunicationAssistant projects={clarityProjects} meps={db.mep} scopes={scopes} allowedModes={['mep-start', 'mep-end']} initialMode="mep-start" />
