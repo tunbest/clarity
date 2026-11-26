@@ -402,7 +402,8 @@ const buildTeamsMeetingUrl = (mep: MepEntry): string => {
     endTime: toIso(meetingEnd),
     content: [
       `MEP : ${getMepRef(mep)} — ${mep.title}`,
-      `Projet : ${mep.project}`,
+      `Application : ${mep.title} (${mep.applicationCode || 'code non renseigné'})`,
+      `Trigrammes : ${(mep.trigrams || []).join(', ') || 'À renseigner'}`,
       `Responsable : ${mep.owner}`,
       `Environnement : ${mep.environment}`,
       `Change : ${mep.changeNumbers || 'À renseigner'}`,
@@ -475,7 +476,7 @@ const normalizeMep = (x: any, projects: Project[]): MepEntry => {
     id,
     ref: String(x.ref || ''),
     projectId: x.projectId || '',
-    project: x.project || project?.name || '',
+    project: String(x.applicationCode || x.title || x.project || project?.name || ''),
     applicationCode: String(x.applicationCode || x.runbook?.applicationCode || ''),
     scopeIds: Array.from(new Set((Array.isArray(x.scopeIds) ? x.scopeIds : []).map((id: any) => String(id || '').trim()).filter(Boolean))),
     title: String(x.title || 'Nouvelle mise en production'),
@@ -541,58 +542,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   useEffect(() => { let active = true; fetch('/api/meps', { credentials: 'same-origin' }).then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Chargement MEP impossible'); return data; }).then((data) => { if (!active) return; const meps = (data.meps || []).map((m: any) => normalizeMep(m, clarityProjects)); setDb({ mep: meps, kanban: [] }); mepRevision.current = Number(data.revision) || 1; setMepLoadError(null); setMepLoaded(true); }).catch((error) => { console.error(error); if (active) { setMepLoadError(error instanceof Error ? error.message : 'Impossible de charger les MEP depuis le serveur'); } }); return () => { active = false; }; }, [currentUser.id]);
   useEffect(() => { setDb((current) => ({ ...current, mep: current.mep.map((m) => ({ ...m, project: clarityProjects.find((p) => p.id === m.projectId)?.name || m.project })) })); }, [clarityProjects]);
 
-  // Reflect edits made in the general project workspace back into linked MEP actions.
-  useEffect(() => {
-    if (!mepLoaded || !db.mep.length) return;
-    let changed = false;
-    const synchronized = db.mep.map((mep) => {
-      const project = clarityProjects.find((item) => item.id === mep.projectId);
-      if (!project) return mep;
-      const baseDate = dayStr(mep.date) || isoToday();
-      const tasks = (mep.tasks || []).map((task) => {
-        if (task.projectTaskId) {
-          const projectTask = project.tasks.find((item) => item.id === task.projectTaskId);
-          if (!projectTask) {
-            changed = true;
-            return { ...task, projectTaskId: undefined };
-          }
-          if (projectTask) {
-            const status: MepTaskStatus = projectTask.status === 'DONE' ? 'Terminé'
-              : projectTask.status === 'IN_PROGRESS' ? 'En cours'
-              : projectTask.status === 'REVIEW' ? 'En validation'
-              : projectTask.status === 'BLOCKED' ? 'Bloqué' : 'À faire';
-            const start = dayStr(projectTask.startDate) || baseDate;
-            const end = dayStr(projectTask.dueDate) || start;
-            const offset = Math.round((new Date(`${start}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
-            const duration = Math.max(1, Math.round((new Date(`${end}T12:00:00`).getTime() - new Date(`${start}T12:00:00`).getTime()) / 86400000) + 1);
-            if (task.status !== status || task.offset !== offset || task.duration !== duration) {
-              changed = true;
-              return { ...task, status, offset, duration };
-            }
-          }
-        }
-        if (task.kind === 'Jalon' && task.projectMilestoneId) {
-          const milestone = project.milestones.find((item) => item.id === task.projectMilestoneId);
-          if (!milestone) {
-            changed = true;
-            return { ...task, projectMilestoneId: undefined };
-          }
-          if (milestone) {
-            const status: MepTaskStatus = milestone.completed ? 'Terminé' : 'À faire';
-            const offset = Math.round((new Date(`${dayStr(milestone.targetDate)}T12:00:00`).getTime() - new Date(`${baseDate}T12:00:00`).getTime()) / 86400000);
-            if (task.status !== status || task.offset !== offset || task.duration !== 1) {
-              changed = true;
-              return { ...task, status, offset, duration: 1 };
-            }
-          }
-        }
-        return task;
-      });
-      return tasks === mep.tasks ? mep : { ...mep, tasks };
-    });
-    if (changed) persistDb({ ...db, mep: synchronized });
-  }, [clarityProjects, db.mep, mepLoaded]);
-
+  // MEP lifecycle is independent from project task and milestone synchronization.
 
   const [page, setPage] = useState<ProdPilotPage>('mep');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -772,8 +722,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   // Prefer the project selected in Clarity; otherwise use the project linked to the MEP portfolio.
   const dashboardProject = useMemo(() => {
     if (!clarityProjects.length) return undefined;
-    return clarityProjects.find((project) => project.id === activeProjectId)
-      || clarityProjects.find((project) => db.mep.some((mep) => mep.projectId === project.id));
+    return clarityProjects.find((project) => project.id === activeProjectId);
   }, [clarityProjects, activeProjectId, db.mep]);
 
   const projectDashboardMetrics = useMemo(
@@ -921,43 +870,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     setIsMepModalOpen(true);
   };
 
-  const syncLinkedProjectData = (mep: MepEntry, tasks: MepTask[]) => {
-    const project = clarityProjects.find((item) => item.id === mep.projectId);
-    if (!project || !onUpdateProject) return;
-    const linkedProjectTaskIds = new Set(tasks.map((task) => task.projectTaskId).filter(Boolean));
-    const mepTag = `MEP:${mep.ref || mep.id}`;
-    const nextTasks = project.tasks.map((projectTask) => {
-      const linked = tasks.find((task) => task.projectTaskId === projectTask.id);
-      if (!linked) {
-        if ((projectTask.tags || []).includes(mepTag) && !linkedProjectTaskIds.has(projectTask.id)) {
-          return { ...projectTask, tags: (projectTask.tags || []).filter((tag) => tag !== mepTag) };
-        }
-        return projectTask;
-      }
-      const dates = getTaskDates(mep, linked);
-      const status = linked.status === 'Terminé' ? 'DONE'
-        : linked.status === 'En cours' ? 'IN_PROGRESS'
-        : linked.status === 'En validation' ? 'REVIEW'
-        : linked.status === 'Bloqué' ? 'BLOCKED' : 'TODO';
-      return {
-        ...projectTask,
-        status,
-        startDate: dates.start,
-        dueDate: dates.end,
-        tags: Array.from(new Set([...(projectTask.tags || []).filter((tag) => tag !== mepTag), mepTag])),
-        completionPercent: status === 'DONE' ? 100 : status === 'IN_PROGRESS' ? Math.max(projectTask.completionPercent || 0, 50) : status === 'REVIEW' ? Math.max(projectTask.completionPercent || 0, 90) : 0,
-      };
-    });
-    const nextMilestones = project.milestones.map((milestone) => {
-      const linked = tasks.find((task) => task.kind === 'Jalon' && task.projectMilestoneId === milestone.id);
-      if (!linked) return milestone;
-      const dates = getTaskDates(mep, linked);
-      const completed = linked.status === 'Terminé';
-      return { ...milestone, targetDate: dates.start, completed, actualDate: completed ? (milestone.actualDate || dates.start) : undefined };
-    });
-    onUpdateProject({ ...project, tasks: nextTasks, milestones: nextMilestones, updatedAt: new Date().toISOString() });
-  };
-
   const handleSaveMep = (e: React.FormEvent) => {
     e.preventDefault();
     if (!(mepForm.title || '').trim()) { showToast('Renseignez le nom de l’application.'); return; }
@@ -977,15 +889,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     const existingMep = db.mep.find((m) => m.id === editMepId);
     const mepId = existingMep?.id || uid('MEP');
     const mepRef = existingMep?.ref || `MEP-${mepId.slice(-5)}`;
-    const targetProject = clarityProjects.find((p) => p.id === mepForm.projectId);
-    if (existingMep && existingMep.projectId !== mepForm.projectId) {
-      const previousProject = clarityProjects.find((p) => p.id === existingMep.projectId);
-      if (previousProject && onUpdateProject) {
-        const previousTag = `MEP:${existingMep.ref || existingMep.id}`;
-        onUpdateProject({ ...previousProject, tasks: previousProject.tasks.map((task) => ({ ...task, tags: (task.tags || []).filter((tag) => tag !== previousTag) })) });
-      }
-    }
-    if (targetProject) syncLinkedProjectData({ ...(existingMep || {} as MepEntry), ...mepForm, id: mepId, ref: mepRef, projectId: targetProject.id, date: mepForm.date || isoToday() } as MepEntry, cleanTasks);
+    // MEP is intentionally independent from the Clarity project hierarchy.
 
     if (editMepId) {
       const updatedMeps = db.mep.map((m) =>
@@ -1051,8 +955,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     setIsMepModalOpen(false);
     if (!editMepId) {
       const savedMep: MepEntry = {
-        id: mepId, ref: mepRef, projectId: (mepForm.projectId || '').trim(),
-        project: targetProject?.name || '', title: (mepForm.title || 'Nouvelle MEP').trim(),
+        id: mepId, ref: mepRef, projectId: '',
+        project: (mepForm.title || '').trim(), applicationCode: String(mepForm.applicationCode || '').trim(), scopeIds: selectedScopes, title: (mepForm.title || 'Nouvelle MEP').trim(),
         version: (mepForm.version || '').trim(), date: mepForm.date || `${isoToday()}T22:00`,
         teamsMeetingStart: mepForm.teamsMeetingStart || shiftLocalDateTime(mepForm.date || `${isoToday()}T22:00`, -30),
         teamsMeetingEnd: mepForm.teamsMeetingEnd || mepForm.date || `${isoToday()}T22:00`,
@@ -1061,7 +965,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         priority: (mepForm.priority as any) || 'Normale', goNoGo: (mepForm.goNoGo as any) || 'En attente',
         changeNumbers: cleanChanges.join(', '), ritmNumbers: cleanRitms.join(', '),
         changeUrl: normalizeServiceNowUrl(mepForm.changeUrl), ritmUrl: normalizeServiceNowUrl(mepForm.ritmUrl),
-        itsmReferences, trigrams: (mepForm.trigrams || []).map((t) => String(t).trim().toUpperCase()),
+        itsmReferences, trigrams: selectedTrigrams,
         rollback: (mepForm.rollback || '').trim(), description: (mepForm.description || '').trim(),
         people: cleanPeople, tasks: cleanTasks, minutes: [], runbook: normalizeRunbook(mepForm.runbook, mepForm.owner || currentUser.displayName || ''),
         createdAt: now, updatedAt: now,
@@ -1367,11 +1271,8 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const existingIds = new Set(db.mep.map((m) => m.id));
       const imported = source.map((raw: any) => {
         const mep = normalizeMep(raw, clarityProjects);
-        const project = clarityProjects.find((p) => p.id === mep.projectId);
-        if (!project) throw new Error(`Projet introuvable pour la MEP « ${mep.title} ».`);
         if (existingIds.has(mep.id)) mep.id = uid('MEP');
         existingIds.add(mep.id);
-        mep.project = project.name;
         mep.minutes = mep.minutes.map((minute) => ({ ...minute, mepId: mep.id }));
         return mep;
       });
@@ -1403,9 +1304,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       if (!source) throw new Error('Format invalide : tableau MEP, meps ou mep attendu.');
       const restoredMeps = source.map((raw: any) => {
         const mep = normalizeMep(raw, clarityProjects);
-        const project = clarityProjects.find((p) => p.id === mep.projectId);
-        if (!project) throw new Error(`La MEP « ${mep.title || mep.id} » n'est liée à aucun projet Clarity existant. Réaffectez-la avant restauration.`);
-        return { ...mep, projectId: project.id, project: project.name };
+        return { ...mep, projectId: '', project: mep.title };
       });
       setConfirmAction({
         title: 'Restaurer la sauvegarde ?',
