@@ -562,7 +562,7 @@ export const App: React.FC = () => {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         
         {/* Profile 1: ADMINISTRATEUR - Exclusively Admin & Security Console */}
-        {currentUser.role === 'ADMINISTRATEUR' && activeTab !== 'PROD_RELEASES' ? (
+        {currentUser.role === 'ADMINISTRATEUR' && !['PROD_RELEASES', 'COPROJ'].includes(activeTab) ? (
           <AdminPage
             currentUser={currentUser}
                 onClose={() => {}}
