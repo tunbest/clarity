@@ -2332,17 +2332,21 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
             <form onSubmit={handleSaveMep} className="p-6 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Projet *</label>
-                  <select
-                    required
-                    value={mepForm.projectId || ''}
-                    onChange={(e) => { const selected = clarityProjects.find((p) => p.id === e.target.value); setMepForm({ ...mepForm, projectId: e.target.value, project: selected?.name || '' }); }}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="">Sélectionner un projet Clarity</option>
-                    {clarityProjects.map((project) => <option key={project.id} value={project.id}>{project.code} — {project.name}</option>)}
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Code application</label>
+                  <input type="text" value={mepForm.applicationCode || ''} onChange={(e) => setMepForm({ ...mepForm, applicationCode: e.target.value.toUpperCase() })} placeholder="Ex. : APP-CRM" className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-mono" />
+                  <p className="text-[10px] text-slate-500 mt-1">La MEP est rattachée à une application, indépendamment des projets Clarity.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Périmètre(s) applicatif(s) *</label>
+                  <select multiple required value={mepForm.scopeIds || []} onChange={(e) => {
+                    const scopeIds = Array.from(e.target.selectedOptions).map((option) => option.value);
+                    const allowed = new Set(scopes.filter((scope) => scopeIds.includes(scope.id)).flatMap((scope) => scope.trigrams || []).map((value) => String(value).toUpperCase()));
+                    setMepForm({ ...mepForm, scopeIds, trigrams: (mepForm.trigrams || []).filter((value) => allowed.has(String(value).toUpperCase())) });
+                  }} className="w-full min-h-24 text-xs p-2.5 rounded-xl border border-slate-300 bg-white">
+                    {scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.code} — {scope.name}</option>)}
                   </select>
-                  {!clarityProjects.length && <p className="text-xs text-rose-600 mt-1">Créez d’abord un projet dans Clarity pour pouvoir planifier une MEP.</p>}
+                  <p className="text-[10px] text-slate-500 mt-1">Sélection multiple possible. Les trigrammes sont limités aux périmètres choisis.</p>
+                  {!scopes.length && <p className="text-xs text-rose-600 mt-1">Aucun périmètre n’est configuré dans le référentiel Clarity.</p>}
                 </div>
 
                 <div>
@@ -2358,11 +2362,11 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Trigrammes concernés (un ou plusieurs)</label>
-                  <select multiple value={mepForm.trigrams || []} onChange={(e) => setMepForm({ ...mepForm, trigrams: Array.from(e.target.selectedOptions).map(o => o.value) })} className="w-full min-h-24 text-xs p-2.5 rounded-xl border border-slate-300 bg-white">
-                    {((clarityProjects.find(p => p.id === mepForm.projectId)?.trigrams?.length ? clarityProjects.find(p => p.id === mepForm.projectId)?.trigrams : scopes.find(s => s.id === clarityProjects.find(p => p.id === mepForm.projectId)?.scopeId)?.trigrams) || []).map(t => <option key={t} value={t}>{t}</option>)}
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Trigrammes concernés *</label>
+                  <select multiple required value={mepForm.trigrams || []} onChange={(e) => setMepForm({ ...mepForm, trigrams: Array.from(e.target.selectedOptions).map((option) => option.value) })} className="w-full min-h-24 text-xs p-2.5 rounded-xl border border-slate-300 bg-white">
+                    {Array.from(new Set(scopes.filter((scope) => (mepForm.scopeIds || []).includes(scope.id)).flatMap((scope) => scope.trigrams || []).map((value) => String(value).trim().toUpperCase()))).sort().map((trigram) => <option key={trigram} value={trigram}>{trigram}</option>)}
                   </select>
-                  <p className="text-[10px] text-slate-500 mt-1">Les trigrammes proposés proviennent du périmètre du projet. Ctrl/Cmd permet une sélection multiple.</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Seuls les trigrammes des périmètres sélectionnés sont disponibles.</p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Version</label>
