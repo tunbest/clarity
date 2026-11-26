@@ -27,6 +27,7 @@ import { PortfolioOverview } from './components/PortfolioOverview';
 import { AdminPage } from './components/AdminPage';
 import { ContributorPortal } from './components/ContributorPortal';
 import { ProductionReleasePortal } from './components/ProductionReleasePortal';
+import { CoprojPortal } from './components/CoprojPortal';
 
 // Modals
 import { AIAssistantModal } from './components/AIAssistantModal';
@@ -42,14 +43,14 @@ const upsertById = <T extends { id: string }>(items: T[], item: T): T[] => {
   return exists ? items.map((current) => (current.id === item.id ? item : current)) : [...items, item];
 };
 
-export type MainTab = 'DASHBOARD' | 'KANBAN' | 'GANTT' | 'TASKS' | 'RISKS' | 'TEAM' | 'PORTFOLIO' | 'ADMIN' | 'CONTRIBUTOR' | 'PROD_RELEASES';
+export type MainTab = 'DASHBOARD' | 'KANBAN' | 'GANTT' | 'TASKS' | 'RISKS' | 'TEAM' | 'PORTFOLIO' | 'ADMIN' | 'CONTRIBUTOR' | 'PROD_RELEASES' | 'COPROJ';
 
-const PROJECT_MANAGER_TABS: MainTab[] = ['PORTFOLIO', 'DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES'];
+const PROJECT_MANAGER_TABS: MainTab[] = ['PORTFOLIO', 'DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PROD_RELEASES', 'COPROJ'];
 
 const ROLE_PERMITTED_TABS: Record<UserRole, MainTab[]> = {
-  ADMINISTRATEUR: ['ADMIN', 'PROD_RELEASES'],
-  DIRECTEUR_PROJETS: ['PORTFOLIO', 'DASHBOARD', 'RISKS', 'TEAM', 'PROD_RELEASES'],
-  PMO: ['PORTFOLIO', 'DASHBOARD', 'GANTT', 'TASKS', 'RISKS', 'PROD_RELEASES'],
+  ADMINISTRATEUR: ['ADMIN', 'PROD_RELEASES', 'COPROJ'],
+  DIRECTEUR_PROJETS: ['PORTFOLIO', 'DASHBOARD', 'RISKS', 'TEAM', 'PROD_RELEASES', 'COPROJ'],
+  PMO: ['PORTFOLIO', 'DASHBOARD', 'GANTT', 'TASKS', 'RISKS', 'PROD_RELEASES', 'COPROJ'],
   CHEF_PROJET: PROJECT_MANAGER_TABS,
   CHEF_PROJET_PROD: PROJECT_MANAGER_TABS,
   CONTRIBUTEUR: ['CONTRIBUTOR'],
@@ -488,9 +489,11 @@ export const App: React.FC = () => {
       targetTab = 'CONTRIBUTOR';
     } else if (upper === 'PROD_RELEASES' || upper === 'PRODUCTION_RELEASES') {
       targetTab = 'PROD_RELEASES';
+    } else if (upper === 'COPROJ') {
+      targetTab = 'COPROJ';
     } else if (upper === 'ADMIN') {
       targetTab = 'ADMIN';
-    } else if (['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PORTFOLIO', 'ADMIN', 'CONTRIBUTOR', 'PROD_RELEASES'].includes(upper)) {
+    } else if (['DASHBOARD', 'KANBAN', 'GANTT', 'TASKS', 'RISKS', 'TEAM', 'PORTFOLIO', 'ADMIN', 'CONTRIBUTOR', 'PROD_RELEASES', 'COPROJ'].includes(upper)) {
       targetTab = upper as MainTab;
     }
 
@@ -534,6 +537,8 @@ export const App: React.FC = () => {
             ? 'my_tasks' 
             : activeTab === 'PROD_RELEASES'
             ? 'prod_releases'
+            : activeTab === 'COPROJ'
+            ? 'coproj'
             : activeTab.toLowerCase()
         }
         metrics={metrics || undefined}
@@ -575,6 +580,7 @@ export const App: React.FC = () => {
             {activeTab === 'PROD_RELEASES' && (
               <ProductionReleasePortal key={workspaceImportVersion} currentUser={currentUser} projects={projects} scopes={scopes} activeProjectId={activeProject?.id} onUpdateProject={handleUpdateProject} />
             )}
+            {activeTab === 'COPROJ' && <CoprojPortal projects={projects} scopes={scopes} />}
 
             {activeTab === 'PORTFOLIO' && (
               <PortfolioOverview
