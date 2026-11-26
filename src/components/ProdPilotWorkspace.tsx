@@ -910,7 +910,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               scopeIds: selectedScopes,
               people: cleanPeople,
               tasks: cleanTasks,
-              runbook: normalizeRunbook(mepForm.runbook || m.runbook, mepForm.owner || m.owner),
+              runbook: normalizeRunbook({ ...(mepForm.runbook || m.runbook || {}), applicationCode: String(mepForm.applicationCode || '').trim(), trigram: selectedTrigrams.join(', ') }, mepForm.owner || m.owner),
               updatedAt: now,
             }
           : m
@@ -946,7 +946,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
         people: cleanPeople,
         tasks: cleanTasks,
         minutes: [],
-        runbook: normalizeRunbook(mepForm.runbook, mepForm.owner || currentUser.displayName || ''),
+        runbook: normalizeRunbook({ ...(mepForm.runbook || {}), applicationCode: String(mepForm.applicationCode || '').trim(), trigram: selectedTrigrams.join(', ') }, mepForm.owner || currentUser.displayName || ''),
         createdAt: now,
         updatedAt: now,
       };
