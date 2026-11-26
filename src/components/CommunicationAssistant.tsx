@@ -21,8 +21,8 @@ const categoryForMode = (mode: CommunicationMode, recipient: Recipient) =>
     : mode === 'mep-end' ? Boolean(recipient.end)
       : Boolean(recipient.coproj || recipient.teams);
 
-export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]; scopes?: PortfolioScope[] }> = ({ projects, meps, scopes = [] }) => {
-  const [mode, setMode] = useState<CommunicationMode>('coproj');
+export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]; scopes?: PortfolioScope[]; allowedModes?: CommunicationMode[]; initialMode?: CommunicationMode }> = ({ projects, meps, scopes = [], allowedModes = ['coproj', 'mep-start', 'mep-end'], initialMode }) => {
+  const [mode, setMode] = useState<CommunicationMode>(initialMode || allowedModes[0] || 'coproj');
   const [selectedMepId, setSelectedMepId] = useState(meps[0]?.id || '');
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id || '');
   const [selectedScopeId, setSelectedScopeId] = useState(scopes.find((scope) => projects.some((project) => project.scopeId === scope.id))?.id || scopes[0]?.id || '');
@@ -234,10 +234,10 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     <section className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
       <div>
         <div className="flex items-center gap-2 text-indigo-700"><Mail className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Communication production · Outlook</span></div>
-        <h3 className="text-lg font-black text-slate-900 mt-1">Préparer un compte rendu projet ou un mail MEP</h3>
-        <p className="text-xs text-slate-500 mt-1">Le COPROJ consolide tous les projets d’un périmètre ; les mails de début et de fin restent rattachés à une MEP.</p>
+        <h3 className="text-lg font-black text-slate-900 mt-1">{mode === 'coproj' ? 'Préparer le COPROJ du périmètre' : 'Préparer les communications de MEP'}</h3>
+        <p className="text-xs text-slate-500 mt-1">{mode === 'coproj' ? 'Synthèse consolidée de tous les projets du périmètre sélectionné.' : 'Les mails de début et de fin restent rattachés à une MEP.'}</p>
       </div>
-      <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-950 space-y-1">
+      {mode === 'coproj' && <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-950 space-y-1">
         <b>Workflow Teams Copilot</b>
         <ol className="list-decimal pl-4 space-y-1">
           <li>Dans Teams, demandez à Copilot le récapitulatif, les décisions et les actions.</li>
@@ -245,13 +245,13 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
           <li>Relisez le compte rendu puis ouvrez le message dans Outlook pour l’enregistrer comme brouillon.</li>
         </ol>
         <p className="font-semibold">Clarity ne lit pas automatiquement la réunion et ne crée pas de décision, responsable ou échéance non présent dans les notes.</p>
-      </div>
+      </div>}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <label className="text-xs font-bold text-slate-700 space-y-1">Document
+        {allowedModes.length > 1 && <label className="text-xs font-bold text-slate-700 space-y-1">Document
           <select value={mode} onChange={(e) => { setMode(e.target.value as CommunicationMode); setDraft({ subject: '', body: '' }); }} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">
-            <option value="coproj">Compte rendu COPROJ</option><option value="mep-start">Mail de début de MEP</option><option value="mep-end">Mail de fin de MEP</option>
+            {allowedModes.includes('coproj') && <option value="coproj">Compte rendu COPROJ</option>}{allowedModes.includes('mep-start') && <option value="mep-start">Mail de début de MEP</option>}{allowedModes.includes('mep-end') && <option value="mep-end">Mail de fin de MEP</option>}
           </select>
-        </label>
+        </label>}
         <label className="text-xs font-bold text-slate-700 space-y-1">{mode === 'coproj' ? 'Périmètre du COPROJ' : 'MEP concernée'}
           {mode === 'coproj'
             ? <select value={selectedScope?.id || ''} onChange={(e) => setSelectedScopeId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{availableScopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.code} · {scope.name}</option>)}</select>
