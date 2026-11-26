@@ -1845,7 +1845,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
          ===================================================================== */}
       {page === 'minutes' && (
         <div className="space-y-4">
-          <CommunicationAssistant projects={clarityProjects} meps={db.mep} />
+          <CommunicationAssistant projects={clarityProjects} meps={db.mep} scopes={scopes} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-black text-slate-900">Comptes rendus de réunion</h3>
