@@ -846,7 +846,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const defaultMepDate = `${isoToday()}T22:00`;
       setMepForm({
         projectId: '', project: (mepForm.title || '').trim(), applicationCode: '', scopeIds: [],
-        title: ''
+        title: '',
         version: '',
         date: defaultMepDate,
         teamsMeetingStart: shiftLocalDateTime(defaultMepDate, -30),
