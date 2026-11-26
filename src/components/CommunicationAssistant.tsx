@@ -12,11 +12,6 @@ const displayValue = (v: unknown) => {
   if (Array.isArray(v)) return v.length ? v.map(String).join(', ') : 'Non renseigné';
   return String(v);
 };
-const cleanTeamsTranscript = (source: string) => source
-  .replace(/^\uFEFF/, '').replace(/^WEBVTT[^\n]*\n?/i, '').replace(/^\d+\s*$/gm, '')
-  .replace(/\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}[^\n]*\n?/g, '')
-  .replace(/<v\s+([^>]+)>/gi, '$1 : ').replace(/<\/?v>/gi, '').replace(/<[^>]+>/g, '')
-  .replace(/\n{3,}/g, '\n\n').trim();
 const categoryForMode = (mode: CommunicationMode, recipient: Recipient) =>
   mode === 'mep-start' ? Boolean(recipient.start)
     : mode === 'mep-end' ? Boolean(recipient.end)
@@ -191,22 +186,6 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     setNotice('success');
   };
 
-  const importTranscript = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!/\.(txt|vtt)$/i.test(file.name)) {
-      setMessage('Import limité aux fichiers .txt et .vtt exportés depuis Teams.');
-      setNotice('warning'); event.target.value = ''; return;
-    }
-    try {
-      setTranscript(cleanTeamsTranscript(await file.text()));
-      setMessage('Notes Teams importées : ' + file.name); setNotice('success');
-    } catch {
-      setMessage('Lecture impossible. Collez directement les notes Teams Facilitator.'); setNotice('warning');
-    }
-    event.target.value = '';
-  };
-
   const openOutlook = () => {
     if (!draft.subject.trim() || !draft.body.trim()) { setMessage('Le sujet et le contenu sont obligatoires.'); setNotice('warning'); return; }
     const selected = activeRecipients.filter((recipient) => selectedRecipientIds.includes(recipient.id));
@@ -310,10 +289,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         <div className="space-y-4">
         <div className="border border-indigo-200 rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><ClipboardPaste className="w-4 h-4 text-indigo-600" /> Notes / transcription Teams Facilitator</div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700 cursor-pointer flex items-center gap-2"><Upload className="w-4 h-4" /> Importer .TXT / .VTT<input type="file" accept=".txt,.vtt,text/plain,text/vtt" onChange={importTranscript} className="sr-only" /></label>
-            <span className="text-[11px] text-slate-500">Ou collez directement les notes Facilitator ci-dessous.</span>
-          </div>
+          <p className="text-[11px] text-slate-500">Copiez les notes depuis le récapitulatif Teams Facilitator et collez-les directement ci-dessous.</p>
           <textarea rows={8} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez ici les notes Facilitator : synthèse, décisions, actions, responsables et échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
