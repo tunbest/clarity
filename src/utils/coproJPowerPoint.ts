@@ -93,8 +93,7 @@ export async function updateCoproJTemplate(source: ArrayBuffer, data: CoprojTemp
     clean(m.ritmNumbers), clean(m.changeNumbers), clean(m.description)
   ]);
   const riskRows = data.risks.map((r, i) => [
-    `R${i + 1}`, clean(r.title), clean(r.owner || r.assignee || 'À affecter'),
-    dateText(r.dueDate), clean(r.status), clean(r.priority || `P${Math.max(1, 5 - Number(r.impact || 0))}`)
+    `R${i + 1}`, clean(r.title), clean(r.probability), clean(r.impact), clean(r.mitigationPlan || 'Plan de mitigation à définir')
   ]);
   const taskRows = data.tasks.map((t, i) => [
     `A${i + 1}`, clean(t.version || ''), clean(t.trigram || t.projectCode || ''),
