@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Copy, Mail, FileText, ClipboardPaste, Upload, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
+import { Copy, Mail, FileText, ClipboardPaste, Upload, Download, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
 import { Project, PortfolioScope } from '../types';
 
 type CommunicationMode = 'mep-start' | 'mep-end' | 'coproj';
