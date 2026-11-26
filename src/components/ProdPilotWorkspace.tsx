@@ -623,7 +623,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const projectNames = useMemo(() => {
     const set = new Set<string>();
     db.mep.forEach((m) => {
-      const p = (m.project || 'Projet non classé').trim();
+      const p = (m.title || 'Application non renseignée').trim();
       if (p) set.add(p);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'fr'));
@@ -845,7 +845,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     } else {
       const defaultMepDate = `${isoToday()}T22:00`;
       setMepForm({
-        projectId: '', project: (mepForm.title || '').trim(), applicationCode: '', scopeIds: [],
+        projectId: '', project: '', applicationCode: '', scopeIds: [],
         title: '',
         version: '',
         date: defaultMepDate,
@@ -905,7 +905,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               ritmUrls: String(mepForm.ritmUrls || mepForm.ritmUrl || ''),
               itsmReferences,
               trigrams: selectedTrigrams,
-              projectId: '', project: '',
+              projectId: '', project: (mepForm.title || '').trim(),
               applicationCode: String(mepForm.applicationCode || '').trim(),
               scopeIds: selectedScopes,
               people: cleanPeople,
@@ -920,7 +920,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
       const newEntry: MepEntry = {
         id: mepId,
         ref: mepRef,
-        projectId: '', project: '',
+        projectId: '', project: (mepForm.title || '').trim(),
         applicationCode: String(mepForm.applicationCode || '').trim(),
         scopeIds: selectedScopes,
         title: (mepForm.title || 'Nouvelle MEP').trim(),
@@ -1735,7 +1735,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                 ))}
               </select>
               <span className="text-xs text-slate-500 hidden sm:inline">
-                {kanbanProjectFilter ? `Vue du projet : ${kanbanProjectFilter}` : 'Vue consolidée de tous les projets'}
+                {kanbanProjectFilter ? `Vue application : ${kanbanProjectFilter}` : 'Vue consolidée de tous les projets'}
               </span>
             </div>
 
@@ -2032,7 +2032,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
               onChange={(e) => setMinuteProjectFilter(e.target.value)}
               className="text-xs px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 font-semibold cursor-pointer"
             >
-              <option value="">Tous les projets</option>
+              <option value="">Toutes les applications</option>
               {projectNames.map((n) => (
                 <option key={n} value={n}>
                   {n}
