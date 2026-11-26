@@ -138,7 +138,7 @@ export async function updateCoproJTemplate(source: ArrayBuffer, data: CoprojTemp
       setShapeByText(doc, (t) => t.includes('Migration Netapp') || t.includes('Déploiement IHM'), data.environmentNotes || 'État des environnements : à compléter dans Clarity PM.');
     }
     if (n === 11 || n === 12) {
-      const start = n === 11 ? 0 : 7;
+      const start = n === 11 ? 0 : 8;
       setTableRows(doc, 0, taskRows.slice(start, start + 8));
     }
     if (n === 13 || n === 14) {
