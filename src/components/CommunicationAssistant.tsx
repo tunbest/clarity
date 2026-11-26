@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Copy, Mail, FileText, ClipboardPaste, Upload, Download, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
 import { Project, PortfolioScope } from '../types';
+import { updateCoproJTemplate } from '../utils/coproJPowerPoint';
 
 type CommunicationMode = 'mep-start' | 'mep-end' | 'coproj';
 interface DraftContent { subject: string; body: string; }
@@ -35,6 +36,8 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [draft, setDraft] = useState<DraftContent>({ subject: '', body: '' });
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState<'info' | 'success' | 'warning'>('info');
+  const [templateHandle, setTemplateHandle] = useState<any>(null);
+  const [templateFileName, setTemplateFileName] = useState('');
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
   const selectedProject = useMemo(() => projects.find((p) => p.id === (mode === 'coproj' ? selectedProjectId : selectedMep?.projectId)), [projects, mode, selectedProjectId, selectedMep]);
   const availableScopes = useMemo(() => scopes.filter((scope) => projects.some((project) => project.scopeId === scope.id)), [scopes, projects]);
@@ -230,6 +233,54 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
     } catch { setMessage('Copie automatique indisponible dans ce navigateur.'); setNotice('warning'); }
   };
 
+
+  const selectCoprojTemplate = async () => {
+    try {
+      const picker = (window as any).showOpenFilePicker;
+      if (!picker) { setMessage('Cette fonction nécessite Microsoft Edge ou Google Chrome à jour, en HTTPS.'); setNotice('warning'); return; }
+      const [handle] = await picker({ multiple: false, types: [{ description: 'Modèle PowerPoint COPROJ', accept: { 'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'] } }] });
+      const file = await handle.getFile();
+      if (!file.name.toLowerCase().endsWith('.pptx')) throw new Error('Sélectionnez un fichier .pptx.');
+      setTemplateHandle(handle);
+      setTemplateFileName(file.name);
+      setMessage('Modèle sélectionné : ' + file.name + '. Il sera remplacé uniquement après création de la sauvegarde.');
+      setNotice('success');
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') { setMessage(error?.message || 'Impossible de sélectionner le modèle PowerPoint.'); setNotice('warning'); }
+    }
+  };
+
+  const replaceCoprojTemplate = async () => {
+    if (!selectedScope || !templateHandle) { setMessage('Sélectionnez d’abord le modèle PowerPoint de votre bureau.'); setNotice('warning'); return; }
+    try {
+      const originalFile = await templateHandle.getFile();
+      const data = {
+        scopeName: selectedScope.name, scopeCode: selectedScope.code || '',
+        date: new Date().toLocaleDateString('fr-FR'),
+        projects: scopeProjects, meps: scopeMeps, risks: scopeRisks, tasks: scopeTasks,
+        milestones: scopeMilestones, transcript, raidNotes, environmentNotes, actionNotes
+      };
+      const updated = await updateCoproJTemplate(await originalFile.arrayBuffer(), data);
+      const backupName = originalFile.name.replace(/\.pptx$/i, '') + '_backup_' + new Date().toISOString().replace(/[:.]/g, '-') + '.pptx';
+      if (!window.confirm('Clarity a préparé la mise à jour de ' + updated.slideCount + ' diapositives. Une sauvegarde complète sera créée avant remplacement. Confirmer ?')) return;
+      const savePicker = (window as any).showSaveFilePicker;
+      if (!savePicker) throw new Error('La sauvegarde sécurisée nécessite Edge ou Chrome à jour.');
+      const backupHandle = await savePicker({ suggestedName: backupName, types: [{ description: 'Sauvegarde PowerPoint', accept: { 'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'] } }] });
+      const backupStream = await backupHandle.createWritable();
+      await backupStream.write(await originalFile.arrayBuffer());
+      await backupStream.close();
+      const targetStream = await templateHandle.createWritable();
+      await targetStream.write(updated.bytes);
+      await targetStream.close();
+      setMessage('Modèle PowerPoint remplacé avec succès : ' + templateFileName + '. Sauvegarde créée : ' + backupName + '. Le modèle et ses 14 diapositives ont été conservés.');
+      setNotice('success');
+    } catch (error: any) {
+      console.error(error);
+      setMessage(error?.message || 'La mise à jour a échoué. Le fichier source n’a pas été remplacé si la sauvegarde ou la génération a échoué.');
+      setNotice('warning');
+    }
+  };
+
   return (
     <section className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
       <div>
@@ -308,7 +359,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
           <input value={manualRecipients} onChange={(e) => setManualRecipients(e.target.value)} placeholder="equipe@entreprise.fr; production@entreprise.fr" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
         </label>
       </div>
-      <div className="flex flex-wrap gap-2"><button onClick={createDraft} disabled={(mode === 'coproj' ? !selectedScope || transcript.trim().length < 20 : !selectedMep)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><FileText className="w-4 h-4" /> Préparer le brouillon</button>{mode === 'coproj' && <button onClick={async () => { if (!selectedScope) return; try { const PptxGenJS = (await import('pptxgenjs')).default; const pptx = new PptxGenJS(); pptx.layout = 'LAYOUT_WIDE'; pptx.author = 'Clarity PM'; pptx.subject = `COPROJ ${selectedScope.name}`; pptx.title = `COPROJ — ${selectedScope.name}`; pptx.company = 'Clarity PM'; pptx.lang = 'fr-FR'; const add = (title: string, lines: string[]) => { const slide = pptx.addSlide(); slide.background = { color: 'F8FAFC' }; slide.addText(title, { x: 0.55, y: 0.35, w: 12.2, h: 0.55, fontFace: 'Aptos Display', fontSize: 25, bold: true, color: '172554', margin: 0 }); slide.addShape(pptx.ShapeType.line, { x: 0.55, y: 1.05, w: 12.2, h: 0, line: { color: '6366F1', width: 2 } }); slide.addText(lines.length ? lines.join('\\n') : 'Aucune donnée renseignée', { x: 0.75, y: 1.35, w: 11.8, h: 5.55, fontFace: 'Aptos', fontSize: 13, color: '334155', valign: 'top', breakLine: false, fit: 'shrink', margin: 0.08, paraSpaceAfterPt: 8 }); slide.addText(`Clarity PM • ${new Date().toLocaleDateString('fr-FR')} • ${selectedScope.code}`, { x: 0.55, y: 7.12, w: 12.2, h: 0.2, fontSize: 8, color: '64748B', margin: 0 }); }; const pct = (p: Project) => (p.tasks || []).length ? Math.round(p.tasks.filter((t) => t.status === 'DONE').length / p.tasks.length * 100) : 0; add(`COPROJ — ${selectedScope.name}`, [`Périmètre : ${selectedScope.code} • Chef de projet : ${scopeProjects[0]?.managerName || 'À renseigner'}`, `Date : ${new Date().toLocaleDateString('fr-FR')}`, `Projets : ${scopeProjects.length} • MEP : ${scopeMeps.length} • Risques actifs : ${scopeRisks.filter((r) => !['CLOSED','MITIGATED'].includes(r.status)).length}`, `Avancement moyen indicatif : ${scopeProjects.length ? Math.round(scopeProjects.reduce((sum,p)=>sum+pct(p),0)/scopeProjects.length) : 0}%`, ...scopeProjects.map((p) => `${p.code} — ${p.name} | ${p.status} | ${pct(p)}%`)]); add('Synthèse exécutive & faits marquants', [transcript.trim() || 'Synthèse de réunion à compléter', `Projets du périmètre : ${scopeProjects.length}`, `Tâches bloquées : ${scopeTasks.filter((t) => t.status === 'BLOCKED').length}`, `Tâches en retard : ${scopeTasks.filter((t) => t.dueDate && t.dueDate < new Date().toISOString().slice(0,10) && t.status !== 'DONE').length}`, `MEP du périmètre : ${scopeMeps.length}`]); add('RAID — Risques, hypothèses, problèmes, dépendances', (raidNotes.trim() ? raidNotes.split('\\n').filter(Boolean) : scopeRisks.map((r) => `RISQUE | ${r.projectName} | ${r.title} | ${r.status} | criticité ${Number(r.probability||0)*Number(r.impact||0)}/25 | ${r.mitigationPlan || 'Mitigation à définir'}`)).concat(['Hypothèses, problèmes et dépendances : compléter avec les éléments de séance.'])); add('Macro-planning & jalons', [...scopeMilestones].sort((a,b)=>String(a.targetDate).localeCompare(String(b.targetDate))).map((m) => `${m.projectName} | ${m.title} | ${m.targetDate || 'Date à définir'} | ${m.completed ? 'Terminé' : 'À venir'}`)); add('Planning détaillé', [...scopeTasks].sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate))).map((t) => `${t.projectName} | ${t.title} | ${t.startDate || '—'} → ${t.dueDate || '—'} | ${t.completionPercent ?? 0}% | ${t.status} | ${t.assigneeId || 'À affecter'}`)); add('État des environnements', environmentNotes.split('\\n').filter(Boolean)); add('Plan d’actions & décisions', (actionNotes.trim() ? actionNotes.split('\\n').filter(Boolean) : scopeTasks.filter((t) => t.status === 'BLOCKED' || (t.dueDate && t.dueDate < new Date().toISOString().slice(0,10) && t.status !== 'DONE')).map((t) => `${t.projectName} | ${t.title} | ${t.assigneeId || 'Pilote à affecter'} | ${t.dueDate || 'Échéance à définir'} | ${t.status}`)).concat(['Décisions et arbitrages : compléter / confirmer en comité.'])); add('MEP du périmètre', scopeMeps.map((m) => `${m.applicationCode || m.title} | ${m.ref || m.id} | ${m.date || 'Date à définir'} | ${m.status} | ${m.environment || 'Environnement à préciser'} | Change ${m.changeNumbers || '—'} | RITM ${m.ritmNumbers || '—'}`)); await pptx.writeFile({ fileName: `COPROJ_${selectedScope.code}_${new Date().toISOString().slice(0,10)}.pptx` }); setMessage('Présentation PowerPoint générée. Vérifiez les champs à compléter avant diffusion.'); setNotice('success'); } catch (error) { console.error(error); setMessage('Génération PowerPoint impossible. Vérifiez le chargement du module puis réessayez.'); setNotice('warning'); } }} className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Exporter le PowerPoint</button>}</div>
+      <div className="flex flex-wrap gap-2"><button onClick={createDraft} disabled={(mode === 'coproj' ? !selectedScope || transcript.trim().length < 20 : !selectedMep)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><FileText className="w-4 h-4" /> Préparer le brouillon</button>{mode === 'coproj' && <><button onClick={selectCoprojTemplate} className="px-4 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center gap-2"><Upload className="w-4 h-4" /> {templateFileName ? 'Changer le modèle' : 'Sélectionner le modèle du bureau'}</button><button onClick={replaceCoprojTemplate} disabled={!templateHandle || !selectedScope} className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Remplacer le PowerPoint existant</button></>}</div>
       {(draft.subject || draft.body) && <div className="border border-indigo-100 bg-indigo-50/30 rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><FileText className="w-4 h-4" /> Brouillon à relire et modifier</div>
         <label className="block text-xs font-bold text-slate-700 space-y-1">Objet
