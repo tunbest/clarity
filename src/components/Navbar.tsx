@@ -16,7 +16,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   ShieldCheck,
-  Rocket
+  Rocket,
+  FileText
 } from 'lucide-react';
 import { Project, ProjectMetrics, AppUser, UserRole } from '../types';
 import { formatCurrency } from '../utils/pmCalculations';
@@ -108,7 +109,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       case 'ADMINISTRATEUR':
         return [
           { id: 'admin', label: 'Console d’Administration & Sécurité', icon: ShieldCheck },
-          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
+          { id: 'prod_releases', label: 'Pilotage MEP', icon: Rocket },
+          { id: 'coproj', label: 'COPROJ', icon: FileText },
         ];
       case 'DIRECTEUR_PROJETS':
         return [
@@ -116,7 +118,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           { id: 'dashboard', label: 'Tableau de Bord Stratégique & KPIs', icon: LayoutDashboard },
           { id: 'risks', label: 'Matrice des Risques Portefeuille', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
           { id: 'workload', label: 'Charge & Capacité des Équipes', icon: Users },
-          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
+          { id: 'prod_releases', label: 'Pilotage MEP', icon: Rocket },
+          { id: 'coproj', label: 'COPROJ', icon: FileText },
         ];
       case 'PMO':
         return [
@@ -125,7 +128,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           { id: 'gantt', label: 'Jalons Stratégiques & Délais', icon: Calendar },
           { id: 'tasks', label: 'Audit WBS & Livrables', icon: ListTodo },
           { id: 'risks', label: 'Revue des Risques & Alertes', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
-          { id: 'prod_releases', label: 'MEP du projet', icon: Rocket },
+          { id: 'prod_releases', label: 'Pilotage MEP', icon: Rocket },
+          { id: 'coproj', label: 'COPROJ', icon: FileText },
         ];
       case 'CHEF_PROJET_PROD':
       case 'CHEF_PROJET':
@@ -138,6 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           { id: 'tasks', label: 'Tâches & WBS', icon: ListTodo },
           { id: 'risks', label: 'Risques & alertes', icon: ShieldAlert, badge: criticalRisks > 0 ? criticalRisks : undefined },
           { id: 'team', label: 'Équipe & ressources', icon: Users },
+          { id: 'coproj', label: 'COPROJ', icon: FileText },
         ];
       case 'CONTRIBUTEUR':
         return [
