@@ -90,7 +90,7 @@ export async function updateCoproJTemplate(source: ArrayBuffer, data: CoprojTemp
   const split = Math.ceil(sortedMeps.length / 2);
   const planningRows = (items: any[]) => items.map((m) => [
     dateText(m.date), clean(m.applicationCode || (m.trigrams || []).join('/')), clean(m.title || m.name),
-    clean(m.ritmNumbers), clean(m.changeNumbers), clean(m.description)
+    clean(m.gireNumber || m.gire || ''), clean(m.changeNumbers), [clean(m.description), m.ritmNumbers ? 'RITM : ' + clean(m.ritmNumbers) : ''].filter(Boolean).join(' · ')
   ]);
   const riskRows = data.risks.map((r, i) => [
     `R${i + 1}`, clean(r.title), clean(r.probability), clean(r.impact), clean(r.mitigationPlan || 'Plan de mitigation à définir')
