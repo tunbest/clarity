@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Copy, Mail, FileText, ClipboardPaste, Upload, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
-import { Project } from '../types';
+import { Project, PortfolioScope } from '../types';
 
 type CommunicationMode = 'mep-start' | 'mep-end' | 'coproj';
 interface DraftContent { subject: string; body: string; }
@@ -21,10 +21,14 @@ const categoryForMode = (mode: CommunicationMode, recipient: Recipient) =>
     : mode === 'mep-end' ? Boolean(recipient.end)
       : Boolean(recipient.coproj || recipient.teams);
 
-export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[] }> = ({ projects, meps }) => {
+export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]; scopes?: PortfolioScope[] }> = ({ projects, meps, scopes = [] }) => {
   const [mode, setMode] = useState<CommunicationMode>('coproj');
   const [selectedMepId, setSelectedMepId] = useState(meps[0]?.id || '');
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id || '');
+  const [selectedScopeId, setSelectedScopeId] = useState(scopes.find((scope) => projects.some((project) => project.scopeId === scope.id))?.id || scopes[0]?.id || '');
+  const [raidNotes, setRaidNotes] = useState('');
+  const [environmentNotes, setEnvironmentNotes] = useState('DEV : à renseigner\\nINT : à renseigner\\nRECETTE : à renseigner\\nPRÉPROD : à renseigner\\nPROD : à renseigner');
+  const [actionNotes, setActionNotes] = useState('');
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
   const [manualRecipients, setManualRecipients] = useState('');
   const [transcript, setTranscript] = useState('');
@@ -32,9 +36,17 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState<'info' | 'success' | 'warning'>('info');
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
-  const selectedProject = useMemo(() => projects.find((p) => p.id === (mode === 'coproj' ? selectedProjectId : selectedMep?.projectId)), [projects, mode, selectedProjectId, selectedMep]);
+  const selectedProject = useMemo(() => projects.find((p) => p.id === selectedProjectId), [projects, selectedProjectId]);
+  const availableScopes = useMemo(() => scopes.filter((scope) => projects.some((project) => project.scopeId === scope.id)), [scopes, projects]);
+  const selectedScope = useMemo(() => availableScopes.find((scope) => scope.id === selectedScopeId) || availableScopes[0], [availableScopes, selectedScopeId]);
+  const scopeProjects = useMemo(() => selectedScope ? projects.filter((project) => project.scopeId === selectedScope.id) : [], [projects, selectedScope]);
+  const scopeProjectIds = useMemo(() => new Set(scopeProjects.map((project) => project.id)), [scopeProjects]);
+  const scopeMeps = useMemo(() => selectedScope ? meps.filter((m) => scopeProjectIds.has(String(m.projectId || '')) || (Array.isArray(m.scopeIds) && m.scopeIds.includes(selectedScope.id))) : [], [meps, selectedScope, scopeProjectIds]);
+  const scopeRisks = useMemo(() => scopeProjects.flatMap((project) => (project.risks || []).map((risk) => ({ ...risk, projectName: project.name }))), [scopeProjects]);
+  const scopeTasks = useMemo(() => scopeProjects.flatMap((project) => (project.tasks || []).map((task) => ({ ...task, projectName: project.name }))), [scopeProjects]);
+  const scopeMilestones = useMemo(() => scopeProjects.flatMap((project) => (project.milestones || []).map((milestone) => ({ ...milestone, projectName: project.name }))), [scopeProjects]);
   const activeRecipients: Recipient[] = mode === 'coproj'
-    ? (selectedProject?.members || []).filter((member) => member.email).map((member) => ({
+    ? Array.from(new Map(scopeProjects.flatMap((project) => project.members || []).filter((member) => member.email).map((member) => [member.id, member])).values()).map((member) => ({
         id: member.id,
         name: member.name,
         email: member.email,
@@ -49,10 +61,10 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       ? activeRecipients
       : activeRecipients.filter((recipient) => categoryForMode(mode, recipient));
     setSelectedRecipientIds(eligible.map((recipient) => recipient.id));
-  }, [selectedMepId, selectedProjectId, mode, meps, projects]);
+  }, [selectedMepId, selectedProjectId, selectedScopeId, mode, meps, projects, scopes]);
 
   const createDraft = () => {
-    if (mode === 'coproj' && !selectedProject) { setMessage('Sélectionnez le projet concerné.'); setNotice('warning'); return; }
+    if (mode === 'coproj' && !selectedScope) { setMessage('Sélectionnez un périmètre contenant vos projets.'); setNotice('warning'); return; }
     if (mode !== 'coproj' && !selectedMep) { setMessage('Sélectionnez une MEP.'); setNotice('warning'); return; }
     if (mode === 'coproj' && transcript.trim().length < 20) { setMessage('Collez les notes ou la transcription Teams Copilot.'); setNotice('warning'); return; }
     const projectName = selectedProject?.name || selectedMep?.project || 'Projet à préciser';
@@ -116,33 +128,53 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       ];
       body = lines.join('\n');
     } else {
-      subject = `Compte rendu COPROJ | ${projectName} | ${new Date().toLocaleDateString('fr-FR')}`;
+      const scopeName = selectedScope?.name || 'Périmètre à préciser';
+      const projectLines = scopeProjects.map((p) => `• ${p.code} — ${p.name} — ${p.status} — ${p.managerName}`);
+      const raidLines = scopeRisks.map((r) => `• RISQUE | ${r.projectName} | ${r.title} | ${r.status} | criticité ${Number(r.probability || 0) * Number(r.impact || 0)}/25 | mitigation : ${r.mitigationPlan || 'à définir'}`);
+      const macroLines = [...scopeMilestones].sort((a,b) => String(a.targetDate).localeCompare(String(b.targetDate))).map((m) => `• ${m.projectName} | ${m.title} | ${m.targetDate || 'date à définir'} | ${m.completed ? 'Terminé' : 'À venir'}`);
+      const detailedLines = [...scopeTasks].sort((a,b) => String(a.dueDate).localeCompare(String(b.dueDate))).map((t) => `• ${t.projectName} | ${t.title} | ${t.startDate || '—'} → ${t.dueDate || '—'} | ${t.completionPercent ?? 0}% | ${t.status} | ${t.assigneeId || 'à affecter'}`);
+      const actionLines = scopeTasks.filter((t) => t.status === 'BLOCKED' || (t.dueDate && t.dueDate < new Date().toISOString().slice(0,10) && t.status !== 'DONE')).map((t) => `• ${t.projectName} | ${t.title} | pilote ${t.assigneeId || 'à affecter'} | échéance ${t.dueDate || 'à définir'} | ${t.status}`);
+      subject = `COPROJ | ${scopeName} | ${new Date().toLocaleDateString('fr-FR')}`;
       body = [
         'Bonjour,',
         '',
-        'COMPTE RENDU — COMITÉ DE PILOTAGE PROJET',
-        `Projet : ${projectName}`,
+        'COMPTE RENDU — COMITÉ DE PILOTAGE DE PÉRIMÈTRE',
+        `Périmètre : ${scopeName}`,
+        `Chef de projet : ${scopeProjects[0]?.managerName || 'À renseigner'}`,
+        `Projets consolidés : ${scopeProjects.length}`,
         `Date : ${new Date().toLocaleDateString('fr-FR')}`,
         '',
-        '1. SYNTHÈSE DE LA RÉUNION',
+        '1. PORTEFEUILLE DU PÉRIMÈTRE',
+        ...(projectLines.length ? projectLines : ['• Aucun projet rattaché à ce périmètre.']),
+        '',
+        '2. SYNTHÈSE DE LA RÉUNION',
         transcript.trim(),
         '',
-        '2. DÉCISIONS',
+        '3. RAID — RISQUES, HYPOTHÈSES, PROBLÈMES, DÉPENDANCES',
+        raidNotes.trim() || (raidLines.length ? raidLines.join('\\n') : 'Aucun risque enregistré. Hypothèses, problèmes et dépendances à compléter.'),
+        '',
+        '4. MACRO-PLANNING — JALONS',
+        ...(macroLines.length ? macroLines : ['• Aucun jalon renseigné.']),
+        '',
+        '5. PLANNING DÉTAILLÉ — ACTIVITÉS',
+        ...(detailedLines.length ? detailedLines : ['• Aucune tâche renseignée.']),
+        '',
+        '6. ÉTAT DES ENVIRONNEMENTS',
+        environmentNotes.trim(),
+        '',
+        '7. PLAN D’ACTIONS',
+        actionNotes.trim() || (actionLines.length ? actionLines.join('\\n') : 'Actions à compléter pendant le comité.'),
+        '',
+        '8. DÉCISIONS',
         'À valider et compléter à partir des notes de réunion.',
         '',
-        '3. PLAN D’ACTIONS',
-        'Action :',
-        'Responsable :',
-        'Échéance :',
-        'Statut :',
+        '9. RISQUES ET ALERTES',
+        raidNotes.trim() || (raidLines.length ? raidLines.join('\\n') : 'À compléter.'),
         '',
-        '4. RISQUES ET ALERTES',
+        '10. ARBITRAGES ATTENDUS',
         'À compléter.',
         '',
-        '5. ARBITRAGES ATTENDUS',
-        'À compléter.',
-        '',
-        '6. PROCHAINES ÉTAPES',
+        '11. PROCHAINES ÉTAPES',
         'À compléter.',
         '',
         'Merci de me transmettre vos corrections ou compléments.',
@@ -203,7 +235,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       <div>
         <div className="flex items-center gap-2 text-indigo-700"><Mail className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Communication production · Outlook</span></div>
         <h3 className="text-lg font-black text-slate-900 mt-1">Préparer un compte rendu projet ou un mail MEP</h3>
-        <p className="text-xs text-slate-500 mt-1">Le compte rendu COPROJ est rattaché au projet ; les mails de début et de fin restent rattachés à une MEP.</p>
+        <p className="text-xs text-slate-500 mt-1">Le COPROJ consolide tous les projets d’un périmètre ; les mails de début et de fin restent rattachés à une MEP.</p>
       </div>
       <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-950 space-y-1">
         <b>Workflow Teams Copilot</b>
@@ -220,15 +252,15 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
             <option value="coproj">Compte rendu COPROJ</option><option value="mep-start">Mail de début de MEP</option><option value="mep-end">Mail de fin de MEP</option>
           </select>
         </label>
-        <label className="text-xs font-bold text-slate-700 space-y-1">{mode === 'coproj' ? 'Projet concerné' : 'MEP concernée'}
+        <label className="text-xs font-bold text-slate-700 space-y-1">{mode === 'coproj' ? 'Périmètre du COPROJ' : 'MEP concernée'}
           {mode === 'coproj'
-            ? <select value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select>
+            ? <select value={selectedScope?.id || ''} onChange={(e) => setSelectedScopeId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{availableScopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.code} · {scope.name}</option>)}</select>
             : <select value={selectedMepId} onChange={(e) => setSelectedMepId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{meps.map((m) => <option key={m.id} value={m.id}>{m.project} · {m.ref || m.id} · {m.title}</option>)}</select>}
         </label>
         <div className="text-xs font-bold text-slate-700 space-y-1">
           <span>{mode === 'coproj' ? 'Destinataires du projet' : 'Destinataires issus de la MEP'}</span>
           {mode === 'coproj'
-            ? <p className="font-normal text-slate-500">Les membres du projet sont proposés automatiquement.</p>
+            ? <p className="font-normal text-slate-500">Les membres de tous les projets du périmètre sont regroupés sans doublon.</p>
             : <select value={selectedMepId} onChange={(e) => setSelectedMepId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">{meps.map((m) => <option key={m.id} value={m.id}>{m.project} · {m.ref || m.id} · {m.title}</option>)}</select>}
         </div>
       </div>
@@ -239,7 +271,20 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
             <label className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700 cursor-pointer flex items-center gap-2"><Upload className="w-4 h-4" /> Importer .TXT / .VTT<input type="file" accept=".txt,.vtt,text/plain,text/vtt" onChange={importTranscript} className="sr-only" /></label>
             <span className="text-[11px] text-slate-500">Ou collez les notes Copilot ci-dessous.</span>
           </div>
-          <textarea rows={10} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez ici les notes Copilot : synthèse, sujets, décisions, actions, responsables et échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
+          <textarea rows={8} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez ici les notes Copilot : synthèse, sujets, décisions, actions, responsables et échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <label className="text-xs font-bold text-slate-700 space-y-1">RAID consolidé (modifiable)
+            <textarea rows={7} value={raidNotes} onChange={(e) => setRaidNotes(e.target.value)} placeholder={scopeRisks.map((r) => `RISQUE | ${r.projectName} | ${r.title} | ${r.status} | ${r.mitigationPlan || 'Mitigation à définir'}`).join('\\n') || 'Risque / Hypothèse / Problème / Dépendance — description — criticité — responsable — échéance — statut'} className="w-full border border-slate-300 rounded-xl p-3 font-normal leading-relaxed" />
+          </label>
+          <label className="text-xs font-bold text-slate-700 space-y-1">État des environnements (modifiable)
+            <textarea rows={7} value={environmentNotes} onChange={(e) => setEnvironmentNotes(e.target.value)} className="w-full border border-slate-300 rounded-xl p-3 font-normal leading-relaxed" />
+          </label>
+          <label className="text-xs font-bold text-slate-700 space-y-1 lg:col-span-2">Plan d’actions consolidé (modifiable)
+            <textarea rows={6} value={actionNotes} onChange={(e) => setActionNotes(e.target.value)} placeholder={scopeTasks.filter((t) => t.status === 'BLOCKED').map((t) => `${t.projectName} | ${t.title} | ${t.assigneeId || 'Pilote à affecter'} | ${t.dueDate || 'Échéance à définir'} | ${t.status}`).join('\\n') || 'Action | Responsable | Échéance | Priorité | Statut'} className="w-full border border-slate-300 rounded-xl p-3 font-normal leading-relaxed" />
+          </label>
+        </div>
+        <div className="rounded-xl border border-slate-200 p-3 text-xs space-y-2"><b>Plannings consolidés</b><p className="text-slate-500">Macro-planning : {scopeMilestones.length} jalon(s). Planning détaillé : {scopeTasks.length} tâche(s), triées par échéance dans le support.</p><p className="text-slate-500">MEP consolidées : {scopeMeps.length} opération(s) du périmètre.</p></div>
         </div>
       ) : selectedMep ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -262,7 +307,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
           <input value={manualRecipients} onChange={(e) => setManualRecipients(e.target.value)} placeholder="equipe@entreprise.fr; production@entreprise.fr" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
         </label>
       </div>
-      <button onClick={createDraft} disabled={(mode === 'coproj' ? !selectedProject || transcript.trim().length < 20 : !selectedMep)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><FileText className="w-4 h-4" /> Préparer le brouillon</button>
+      <div className="flex flex-wrap gap-2"><button onClick={createDraft} disabled={(mode === 'coproj' ? !selectedScope || transcript.trim().length < 20 : !selectedMep)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><FileText className="w-4 h-4" /> Préparer le brouillon</button>{mode === 'coproj' && <button onClick={async () => { if (!selectedScope) return; try { const PptxGenJS = (await import('pptxgenjs')).default; const pptx = new PptxGenJS(); pptx.layout = 'LAYOUT_WIDE'; pptx.author = 'Clarity PM'; pptx.subject = `COPROJ ${selectedScope.name}`; pptx.title = `COPROJ — ${selectedScope.name}`; pptx.company = 'Clarity PM'; pptx.lang = 'fr-FR'; const add = (title: string, lines: string[]) => { const slide = pptx.addSlide(); slide.background = { color: 'F8FAFC' }; slide.addText(title, { x: 0.55, y: 0.35, w: 12.2, h: 0.55, fontFace: 'Aptos Display', fontSize: 25, bold: true, color: '172554', margin: 0 }); slide.addShape(pptx.ShapeType.line, { x: 0.55, y: 1.05, w: 12.2, h: 0, line: { color: '6366F1', width: 2 } }); slide.addText(lines.length ? lines.join('\\n') : 'Aucune donnée renseignée', { x: 0.75, y: 1.35, w: 11.8, h: 5.55, fontFace: 'Aptos', fontSize: 13, color: '334155', valign: 'top', breakLine: false, fit: 'shrink', margin: 0.08, paraSpaceAfterPt: 8 }); slide.addText(`Clarity PM • ${new Date().toLocaleDateString('fr-FR')} • ${selectedScope.code}`, { x: 0.55, y: 7.12, w: 12.2, h: 0.2, fontSize: 8, color: '64748B', margin: 0 }); }; const pct = (p: Project) => (p.tasks || []).length ? Math.round(p.tasks.filter((t) => t.status === 'DONE').length / p.tasks.length * 100) : 0; add(`COPROJ — ${selectedScope.name}`, [`Périmètre : ${selectedScope.code} • Chef de projet : ${scopeProjects[0]?.managerName || 'À renseigner'}`, `Date : ${new Date().toLocaleDateString('fr-FR')}`, `Projets : ${scopeProjects.length} • MEP : ${scopeMeps.length} • Risques actifs : ${scopeRisks.filter((r) => !['CLOSED','MITIGATED'].includes(r.status)).length}`, `Avancement moyen indicatif : ${scopeProjects.length ? Math.round(scopeProjects.reduce((sum,p)=>sum+pct(p),0)/scopeProjects.length) : 0}%`, ...scopeProjects.map((p) => `${p.code} — ${p.name} | ${p.status} | ${pct(p)}%`)]); add('Synthèse exécutive & faits marquants', [transcript.trim() || 'Synthèse de réunion à compléter', `Projets du périmètre : ${scopeProjects.length}`, `Tâches bloquées : ${scopeTasks.filter((t) => t.status === 'BLOCKED').length}`, `Tâches en retard : ${scopeTasks.filter((t) => t.dueDate && t.dueDate < new Date().toISOString().slice(0,10) && t.status !== 'DONE').length}`, `MEP du périmètre : ${scopeMeps.length}`]); add('RAID — Risques, hypothèses, problèmes, dépendances', (raidNotes.trim() ? raidNotes.split('\\n').filter(Boolean) : scopeRisks.map((r) => `RISQUE | ${r.projectName} | ${r.title} | ${r.status} | criticité ${Number(r.probability||0)*Number(r.impact||0)}/25 | ${r.mitigationPlan || 'Mitigation à définir'}`)).concat(['Hypothèses, problèmes et dépendances : compléter avec les éléments de séance.'])); add('Macro-planning & jalons', [...scopeMilestones].sort((a,b)=>String(a.targetDate).localeCompare(String(b.targetDate))).map((m) => `${m.projectName} | ${m.title} | ${m.targetDate || 'Date à définir'} | ${m.completed ? 'Terminé' : 'À venir'}`)); add('Planning détaillé', [...scopeTasks].sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate))).map((t) => `${t.projectName} | ${t.title} | ${t.startDate || '—'} → ${t.dueDate || '—'} | ${t.completionPercent ?? 0}% | ${t.status} | ${t.assigneeId || 'À affecter'}`)); add('État des environnements', environmentNotes.split('\\n').filter(Boolean)); add('Plan d’actions & décisions', (actionNotes.trim() ? actionNotes.split('\\n').filter(Boolean) : scopeTasks.filter((t) => t.status === 'BLOCKED' || (t.dueDate && t.dueDate < new Date().toISOString().slice(0,10) && t.status !== 'DONE')).map((t) => `${t.projectName} | ${t.title} | ${t.assigneeId || 'Pilote à affecter'} | ${t.dueDate || 'Échéance à définir'} | ${t.status}`)).concat(['Décisions et arbitrages : compléter / confirmer en comité.'])); add('MEP du périmètre', scopeMeps.map((m) => `${m.applicationCode || m.title} | ${m.ref || m.id} | ${m.date || 'Date à définir'} | ${m.status} | ${m.environment || 'Environnement à préciser'} | Change ${m.changeNumbers || '—'} | RITM ${m.ritmNumbers || '—'}`)); await pptx.writeFile({ fileName: `COPROJ_${selectedScope.code}_${new Date().toISOString().slice(0,10)}.pptx` }); setMessage('Présentation PowerPoint générée. Vérifiez les champs à compléter avant diffusion.'); setNotice('success'); } catch (error) { console.error(error); setMessage('Génération PowerPoint impossible. Vérifiez le chargement du module puis réessayez.'); setNotice('warning'); } }} className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Exporter le PowerPoint</button>}</div>
       {(draft.subject || draft.body) && <div className="border border-indigo-100 bg-indigo-50/30 rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><FileText className="w-4 h-4" /> Brouillon à relire et modifier</div>
         <label className="block text-xs font-bold text-slate-700 space-y-1">Objet
