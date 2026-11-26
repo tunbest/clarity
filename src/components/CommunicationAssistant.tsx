@@ -36,7 +36,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState<'info' | 'success' | 'warning'>('info');
   const selectedMep = useMemo(() => meps.find((m) => m.id === selectedMepId), [meps, selectedMepId]);
-  const selectedProject = useMemo(() => projects.find((p) => p.id === selectedProjectId), [projects, selectedProjectId]);
+  const selectedProject = useMemo(() => projects.find((p) => p.id === (mode === 'coproj' ? selectedProjectId : selectedMep?.projectId)), [projects, mode, selectedProjectId, selectedMep]);
   const availableScopes = useMemo(() => scopes.filter((scope) => projects.some((project) => project.scopeId === scope.id)), [scopes, projects]);
   const selectedScope = useMemo(() => availableScopes.find((scope) => scope.id === selectedScopeId) || availableScopes[0], [availableScopes, selectedScopeId]);
   const scopeProjects = useMemo(() => selectedScope ? projects.filter((project) => project.scopeId === selectedScope.id) : [], [projects, selectedScope]);
