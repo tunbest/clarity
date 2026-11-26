@@ -32,6 +32,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const [actionNotes, setActionNotes] = useState('');
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
   const [manualRecipients, setManualRecipients] = useState('');
+  const [manualCcRecipients, setManualCcRecipients] = useState('');
   const [transcript, setTranscript] = useState('');
   const [draft, setDraft] = useState<DraftContent>({ subject: '', body: '' });
   const [message, setMessage] = useState('');
@@ -69,7 +70,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const createDraft = () => {
     if (mode === 'coproj' && !selectedScope) { setMessage('Sélectionnez un périmètre contenant vos projets.'); setNotice('warning'); return; }
     if (mode !== 'coproj' && !selectedMep) { setMessage('Sélectionnez une MEP.'); setNotice('warning'); return; }
-    if (mode === 'coproj' && transcript.trim().length < 20) { setMessage('Collez les notes ou la transcription Teams Copilot.'); setNotice('warning'); return; }
+    if (mode === 'coproj' && transcript.trim().length < 20) { setMessage('Collez les notes ou la transcription Teams Facilitator.'); setNotice('warning'); return; }
     const projectName = selectedProject?.name || selectedMep?.project || 'Projet à préciser';
     const m = selectedMep;
     let subject = '';
@@ -201,7 +202,7 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       setTranscript(cleanTeamsTranscript(await file.text()));
       setMessage('Notes Teams importées : ' + file.name); setNotice('success');
     } catch {
-      setMessage('Lecture impossible. Collez directement les notes Teams Copilot.'); setNotice('warning');
+      setMessage('Lecture impossible. Collez directement les notes Teams Facilitator.'); setNotice('warning');
     }
     event.target.value = '';
   };
@@ -284,19 +285,9 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   return (
     <section className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
       <div>
-        <div className="flex items-center gap-2 text-indigo-700"><Mail className="w-4 h-4" /><span className="text-[11px] font-black uppercase tracking-wider">Communication production · Outlook</span></div>
-        <h3 className="text-lg font-black text-slate-900 mt-1">{mode === 'coproj' ? 'Préparer le COPROJ du périmètre' : 'Préparer les communications de MEP'}</h3>
-        <p className="text-xs text-slate-500 mt-1">{mode === 'coproj' ? 'Synthèse consolidée de tous les projets du périmètre sélectionné.' : 'Les mails de début et de fin restent rattachés à une MEP.'}</p>
+        <h3 className="text-lg font-black text-slate-900">{mode === 'coproj' ? 'Compte rendu COPROJ' : 'Communications de MEP'}</h3>
+        <p className="text-xs text-slate-500 mt-1">{mode === 'coproj' ? 'Collez les notes générées par Teams Facilitator pour préparer le compte rendu du périmètre.' : 'Les mails de début et de fin restent rattachés à une MEP.'}</p>
       </div>
-      {mode === 'coproj' && <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-950 space-y-1">
-        <b>Workflow Teams Copilot</b>
-        <ol className="list-decimal pl-4 space-y-1">
-          <li>Dans Teams, demandez à Copilot le récapitulatif, les décisions et les actions.</li>
-          <li>Copiez les notes ou importez le fichier Teams .TXT / .VTT.</li>
-          <li>Relisez le compte rendu puis ouvrez le message dans Outlook pour l’enregistrer comme brouillon.</li>
-        </ol>
-        <p className="font-semibold">Clarity ne lit pas automatiquement la réunion et ne crée pas de décision, responsable ou échéance non présent dans les notes.</p>
-      </div>}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         {allowedModes.length > 1 && <label className="text-xs font-bold text-slate-700 space-y-1">Document
           <select value={mode} onChange={(e) => { setMode(e.target.value as CommunicationMode); setDraft({ subject: '', body: '' }); }} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-white">
@@ -318,12 +309,12 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
       {mode === 'coproj' ? (
         <div className="space-y-4">
         <div className="border border-indigo-200 rounded-xl p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><ClipboardPaste className="w-4 h-4 text-indigo-600" /> Notes / transcription Teams Copilot</div>
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-800"><ClipboardPaste className="w-4 h-4 text-indigo-600" /> Notes / transcription Teams Facilitator</div>
           <div className="flex flex-wrap items-center gap-3">
             <label className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700 cursor-pointer flex items-center gap-2"><Upload className="w-4 h-4" /> Importer .TXT / .VTT<input type="file" accept=".txt,.vtt,text/plain,text/vtt" onChange={importTranscript} className="sr-only" /></label>
-            <span className="text-[11px] text-slate-500">Ou collez les notes Copilot ci-dessous.</span>
+            <span className="text-[11px] text-slate-500">Ou collez directement les notes Facilitator ci-dessous.</span>
           </div>
-          <textarea rows={8} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez ici les notes Copilot : synthèse, sujets, décisions, actions, responsables et échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
+          <textarea rows={8} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Collez ici les notes Facilitator : synthèse, décisions, actions, responsables et échéances…" className="w-full border border-slate-300 rounded-xl p-3 text-sm leading-relaxed" />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <label className="text-xs font-bold text-slate-700 space-y-1">RAID consolidé (modifiable)
@@ -355,9 +346,12 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
             <span className="text-[10px] text-slate-400">{[recipient.information && 'Info', recipient.sondes && 'Sondes', recipient.start && 'Début', recipient.end && 'Fin', recipient.coproj && 'COPROJ'].filter(Boolean).join(' / ')}</span>
           </label>
         ))}</div> : <p className="text-xs text-slate-500">{mode === 'coproj' ? 'Aucun membre avec adresse e-mail dans ce projet. Ajoutez les membres au projet ou saisissez des adresses ponctuelles.' : 'Aucun destinataire enregistré sur cette MEP. Ajoutez-les dans Pilotage → Paramètres & destinataires.'}</p>}
-        <label className="block text-xs font-bold text-slate-700 space-y-1">Ajouter des adresses ponctuelles en À (facultatif)
-          <input value={manualRecipients} onChange={(e) => setManualRecipients(e.target.value)} placeholder="equipe@entreprise.fr; production@entreprise.fr" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
+        <label className="block text-xs font-bold text-slate-700 space-y-1">Adresses en À (séparées par virgule, point-virgule ou retour à la ligne)
+          <textarea rows={2} value={manualRecipients} onChange={(e) => setManualRecipients(e.target.value)} placeholder="equipe@entreprise.fr, production@entreprise.fr" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
         </label>
+        {mode === 'coproj' && <label className="block text-xs font-bold text-slate-700 space-y-1">Adresses en Cc (facultatif)
+          <textarea rows={2} value={manualCcRecipients} onChange={(e) => setManualCcRecipients(e.target.value)} placeholder="responsable@entreprise.fr; direction@entreprise.fr" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal" />
+        </label>}
       </div>
       <div className="flex flex-wrap gap-2"><button onClick={createDraft} disabled={(mode === 'coproj' ? !selectedScope || transcript.trim().length < 20 : !selectedMep)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><FileText className="w-4 h-4" /> Préparer le brouillon</button>{mode === 'coproj' && <><button onClick={selectCoprojTemplate} className="px-4 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center gap-2"><Upload className="w-4 h-4" /> {templateFileName ? 'Changer le modèle' : 'Sélectionner le modèle du bureau'}</button><button onClick={replaceCoprojTemplate} disabled={!templateHandle || !selectedScope} className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Remplacer le PowerPoint existant</button></>}</div>
       {(draft.subject || draft.body) && <div className="border border-indigo-100 bg-indigo-50/30 rounded-xl p-4 space-y-3">
