@@ -845,7 +845,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     } else {
       const defaultMepDate = `${isoToday()}T22:00`;
       setMepForm({
-        projectId: '', project: '', applicationCode: '', scopeIds: [],
+        projectId: '', project: (mepForm.title || '').trim(), applicationCode: '', scopeIds: [],
         title: ''
         version: '',
         date: defaultMepDate,
@@ -1012,7 +1012,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
   const handleMoveKanbanTask = (taskId: string, newStatus: MepTaskStatus) => {
     const updated = db.mep.map((m) => {
       const tasks = (m.tasks || []).map((t) => (t.id === taskId ? { ...t, status: newStatus } : t));
-      if (tasks.some((t, index) => t.id === taskId && t.status === newStatus)) syncLinkedProjectData(m, tasks);
       return { ...m, tasks };
     });
     persistDb({ ...db, mep: updated });
@@ -1722,13 +1721,13 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
 
           <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <label className="text-xs font-bold text-slate-700">Projet :</label>
+              <label className="text-xs font-bold text-slate-700">Application :</label>
               <select
                 value={kanbanProjectFilter}
                 onChange={(e) => setKanbanProjectFilter(e.target.value)}
                 className="text-xs px-3 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 cursor-pointer"
               >
-                <option value="">Tous les projets</option>
+                <option value="">Toutes les applications</option>
                 {projectNames.map((n) => (
                   <option key={n} value={n}>
                     {n}
@@ -2544,7 +2543,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                     {taskDraft.map((t, i) => (
                       <div
                         key={t.id}
-                        className="grid grid-cols-1 md:grid-cols-[2fr_90px_1fr_80px_70px_115px_1fr_1fr_34px] gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200"
+                        className="grid grid-cols-1 md:grid-cols-[2fr_90px_1fr_80px_70px_1fr_34px] gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200"
                       >
                         <input
                           type="text"
@@ -2603,49 +2602,6 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
                           }}
                           className="text-xs p-2 rounded-lg border border-slate-300 bg-white font-mono"
                         />
-                        <select
-                          value={t.projectTaskId || ''}
-                          title="Lier à une tâche du projet général"
-                          onChange={(e) => {
-                            const next = [...taskDraft];
-                            next[i].projectTaskId = e.target.value || undefined;
-                            setTaskDraft(next);
-                          }}
-                          className="text-xs p-2 rounded-lg border border-slate-300 bg-white"
-                        >
-                          <option value="">Tâche projet : aucune</option>
-                          {(clarityProjects.find((p) => p.id === mepForm.projectId)?.tasks || []).map((projectTask) => (
-                            <option
-                              key={projectTask.id}
-                              value={projectTask.id}
-                              disabled={db.mep.some((entry) => entry.id !== editMepId && entry.projectId === mepForm.projectId && entry.tasks.some((linkedTask) => linkedTask.projectTaskId === projectTask.id)) || taskDraft.some((other, otherIndex) => otherIndex !== i && other.projectTaskId === projectTask.id)}
-                            >
-                              {projectTask.title}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          value={t.projectMilestoneId || ''}
-                          title="Lier à un jalon du projet général"
-                          disabled={t.kind !== 'Jalon'}
-                          onChange={(e) => {
-                            const next = [...taskDraft];
-                            next[i].projectMilestoneId = e.target.value || undefined;
-                            setTaskDraft(next);
-                          }}
-                          className="text-xs p-2 rounded-lg border border-slate-300 bg-white disabled:opacity-40"
-                        >
-                          <option value="">Jalon projet : aucun</option>
-                          {(clarityProjects.find((p) => p.id === mepForm.projectId)?.milestones || []).map((milestone) => (
-                            <option
-                              key={milestone.id}
-                              value={milestone.id}
-                              disabled={db.mep.some((entry) => entry.id !== editMepId && entry.projectId === mepForm.projectId && entry.tasks.some((linkedTask) => linkedTask.projectMilestoneId === milestone.id))}
-                            >
-                              {milestone.title}
-                            </option>
-                          ))}
-                        </select>
                         <select
                           value={t.status}
                           onChange={(e) => {
