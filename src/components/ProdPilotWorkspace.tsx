@@ -1313,7 +1313,7 @@ export const ProdPilotWorkspace: React.FC<ProdPilotWorkspaceProps> = ({
     { id: 'mep', label: 'Registre des MEP', icon: Rocket, badge: db.mep.length },
     { id: 'planning', label: 'Planning & calendrier', icon: CalendarIcon },
     { id: 'coproj', label: 'COPROJ – Synthèse périmètre', icon: FileText },
-    { id: 'minutes', label: 'Comptes rendus & mails', icon: Mail },
+    { id: 'minutes', label: 'Comptes rendus & mails', icon: FileText },
     { id: 'settings', label: 'Paramètres & sauvegarde', icon: Settings },
   ];
 
