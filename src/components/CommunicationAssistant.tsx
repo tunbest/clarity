@@ -253,6 +253,11 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
   const replaceCoprojTemplate = async () => {
     if (!selectedScope || !templateHandle) { setMessage('Sélectionnez d’abord le modèle PowerPoint de votre bureau.'); setNotice('warning'); return; }
     try {
+      const savePicker = (window as any).showSaveFilePicker;
+      if (!savePicker) throw new Error('La sauvegarde sécurisée nécessite Edge ou Chrome à jour.');
+      const backupName = templateFileName.replace(/\.pptx$/i, '') + '_backup_' + new Date().toISOString().replace(/[:.]/g, '-') + '.pptx';
+      if (!window.confirm('Clarity va préparer la mise à jour du modèle. Une sauvegarde complète sera créée avant remplacement. Confirmer ?')) return;
+      const backupHandle = await savePicker({ suggestedName: backupName, types: [{ description: 'Sauvegarde PowerPoint', accept: { 'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'] } }] });
       const originalFile = await templateHandle.getFile();
       const data = {
         scopeName: selectedScope.name, scopeCode: selectedScope.code || '',
@@ -261,11 +266,6 @@ export const CommunicationAssistant: React.FC<{ projects: Project[]; meps: any[]
         milestones: scopeMilestones, transcript, raidNotes, environmentNotes, actionNotes
       };
       const updated = await updateCoproJTemplate(await originalFile.arrayBuffer(), data);
-      const backupName = originalFile.name.replace(/\.pptx$/i, '') + '_backup_' + new Date().toISOString().replace(/[:.]/g, '-') + '.pptx';
-      if (!window.confirm('Clarity a préparé la mise à jour de ' + updated.slideCount + ' diapositives. Une sauvegarde complète sera créée avant remplacement. Confirmer ?')) return;
-      const savePicker = (window as any).showSaveFilePicker;
-      if (!savePicker) throw new Error('La sauvegarde sécurisée nécessite Edge ou Chrome à jour.');
-      const backupHandle = await savePicker({ suggestedName: backupName, types: [{ description: 'Sauvegarde PowerPoint', accept: { 'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'] } }] });
       const backupStream = await backupHandle.createWritable();
       await backupStream.write(await originalFile.arrayBuffer());
       await backupStream.close();
