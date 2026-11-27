@@ -78,6 +78,108 @@ jobs:
           cat "$ENV_TMP" > "$STACK_DIR/.env"
           rm -f "$ENV_TMP"
           chmod 600 "$STACK_DIR/.env"
+          # Stable master key for AES-256-GCM encrypted integration credentials.
+          # Generate it once; never rotate it automatically or existing encrypted keys become unreadable.
+          if ! grep -Eq '^CLARITY_SECRETS_ENCRYPTION_KEY=[a-f0-9]{64}
+          test -f "$STACK_DIR/db-init/01-create-app-role.sh" || test -f "$STACK_DIR/db-init/sync-app-role.sh" || { echo "Database role initialization/sync script is missing." >&2; exit 1; }
+          docker network inspect shared_network >/dev/null 2>&1 || { echo "External Docker network shared_network is missing." >&2; exit 1; }
+
+          mkdir -p "$(dirname "$APP_DIR")"
+          if [ ! -d "$APP_DIR/.git" ]; then
+            if [ -e "$APP_DIR" ] && [ -n "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+              BACKUP_DIR="${APP_DIR}.predeploy.$(date +%Y%m%d%H%M%S)"
+              echo "Preserving pre-existing source directory at: $BACKUP_DIR"
+              mv "$APP_DIR" "$BACKUP_DIR"
+            fi
+            git clone --no-checkout https://github.com/tunbest/clarity.git "$APP_DIR"
+          fi
+
+          cd "$APP_DIR"
+          git remote set-url origin https://github.com/tunbest/clarity.git
+          git fetch origin "$DEPLOY_SHA"
+          git checkout --detach --force "$DEPLOY_SHA"
+
+          for file in Dockerfile package.json scripts/build-server.mjs server.ts src/db/dbClient.ts; do
+            test -f "$APP_DIR/$file" || { echo "Required source file missing: $file" >&2; exit 1; }
+          done
+          test -f "$APP_DIR/.dockerignore" || { echo ".dockerignore is missing; refusing to build with a potentially unsafe context." >&2; exit 1; }
+
+          # Temporary Compose override: reuse the live project, env, network and DB volume,
+          # while building only the app image from the freshly checked-out source.
+          OVERRIDE_FILE="$STACK_DIR/docker-compose.deploy.yml"
+          cleanup() { rm -f "$OVERRIDE_FILE"; }
+          trap cleanup EXIT
+          cat > "$OVERRIDE_FILE" <<'YAML'
+          services:
+            app:
+              env_file:
+                - /root/clarity-prod/.env
+              environment:
+                PROJECT_ANALYSIS_API_URL: http://project-analysis-api:8000
+              build:
+                context: /root/vp
+                dockerfile: Dockerfile
+            project-analysis-api:
+              build:
+                context: /root/vp/project-analysis-api
+                dockerfile: Dockerfile
+              env_file:
+                - /root/clarity-prod/.env
+              environment:
+                DATABASE_URL: ""
+                POSTGRES_HOST: postgres
+                POSTGRES_PORT: "5432"
+                POSTGRES_DB: ${POSTGRES_DB}
+                POSTGRES_USER: clarity_app
+                POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD}
+                GEMINI_MODEL: gemini-3.8-flash
+              depends_on:
+                db-credentials-sync:
+                  condition: service_completed_successfully
+              restart: unless-stopped
+              expose:
+                - "8000"
+              networks:
+                - shared_network
+              healthcheck:
+                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+                interval: 30s
+                timeout: 5s
+                retries: 3
+                start_period: 30s
+          YAML
+
+          COMPOSE=(docker compose --project-directory "$STACK_DIR" --env-file "$STACK_DIR/.env" -f "$STACK_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
+
+          "${COMPOSE[@]}" config --quiet
+          "${COMPOSE[@]}" up -d --build app project-analysis-api
+
+          healthy=0
+          for attempt in $(seq 1 36); do
+            if "${COMPOSE[@]}" exec -T app curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+              healthy=1
+              break
+            fi
+            sleep 5
+          done
+
+          "${COMPOSE[@]}" ps
+          if [ "$healthy" -ne 1 ]; then
+            "${COMPOSE[@]}" logs --tail=150 app postgres db-credentials-sync || true
+            echo "Clarity health check failed. The existing PostgreSQL volume was not removed." >&2
+            exit 1
+          fi
+
+          echo "Clarity PM deployed successfully: $DEPLOY_SHA"
+          REMOTE
+ "$STACK_DIR/.env"; then
+            ENV_TMP="$(mktemp)"
+            grep -v '^CLARITY_SECRETS_ENCRYPTION_KEY=' "$STACK_DIR/.env" > "$ENV_TMP" || true
+            printf 'CLARITY_SECRETS_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)" >> "$ENV_TMP"
+            cat "$ENV_TMP" > "$STACK_DIR/.env"
+            rm -f "$ENV_TMP"
+            chmod 600 "$STACK_DIR/.env"
+          fi
           test -f "$STACK_DIR/db-init/01-create-app-role.sh" || test -f "$STACK_DIR/db-init/sync-app-role.sh" || { echo "Database role initialization/sync script is missing." >&2; exit 1; }
           docker network inspect shared_network >/dev/null 2>&1 || { echo "External Docker network shared_network is missing." >&2; exit 1; }
 
