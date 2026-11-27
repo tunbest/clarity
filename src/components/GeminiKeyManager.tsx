@@ -3,6 +3,19 @@ import { KeyRound, ShieldCheck, CheckCircle2, AlertTriangle, Trash2, RefreshCw, 
 
 type Status = { configured: boolean; provider: string; updatedAt?: string | null };
 
+async function readApiResponse(response: Response): Promise<any> {
+  const contentType = response.headers.get('content-type') || '';
+  const raw = await response.text();
+  if (!contentType.toLowerCase().includes('application/json')) {
+    const isHtml = /^\\s*<!doctype html|^\\s*<html/i.test(raw);
+    throw new Error(isHtml
+      ? `L'API Clarity n'a pas répondu en JSON (HTTP ${response.status}). La route Gemini n'est probablement pas déployée ou la requête est redirigée vers l'interface web.`
+      : `Réponse API inattendue (HTTP ${response.status}, ${contentType || 'type inconnu'}).`);
+  }
+  try { return raw ? JSON.parse(raw) : {}; }
+  catch { throw new Error(`Réponse JSON invalide (HTTP ${response.status}).`); }
+}
+
 export const GeminiKeyManager: React.FC = () => {
   const [status, setStatus] = useState<Status>({ configured: false, provider: 'Google Gemini Flash' });
   const [apiKey, setApiKey] = useState('');
@@ -17,7 +30,7 @@ export const GeminiKeyManager: React.FC = () => {
     setLoading(true);
     try {
       const response = await fetch('/api/admin/gemini/status', { credentials: 'same-origin', cache: 'no-store' });
-      const data = await response.json();
+      const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || 'Lecture de la configuration impossible.');
       setStatus(data);
     } catch (error) {
