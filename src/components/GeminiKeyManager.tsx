@@ -50,7 +50,7 @@ export const GeminiKeyManager: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: apiKey.trim() })
       });
-      const data = await response.json();
+      const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || 'Enregistrement impossible.');
       setApiKey(''); setShowKey(false);
       setMessage({ ok: true, text: 'Clé Gemini enregistrée et chiffrée côté serveur.' });
@@ -64,7 +64,7 @@ export const GeminiKeyManager: React.FC = () => {
     setTesting(true); setMessage(null);
     try {
       const response = await fetch('/api/admin/gemini/test', { method: 'POST', credentials: 'same-origin' });
-      const data = await response.json();
+      const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || 'Test Gemini échoué.');
       setMessage({ ok: true, text: `Connexion Gemini opérationnelle · ${data.model} · ${data.latencyMs} ms` });
       await refresh();
@@ -78,7 +78,7 @@ export const GeminiKeyManager: React.FC = () => {
     setDeleting(true); setMessage(null);
     try {
       const response = await fetch('/api/admin/gemini/key', { method: 'DELETE', credentials: 'same-origin' });
-      const data = await response.json();
+      const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || 'Suppression impossible.');
       setStatus({ configured: false, provider: 'Google Gemini Flash' });
       setMessage({ ok: true, text: 'Clé Gemini supprimée.' });
