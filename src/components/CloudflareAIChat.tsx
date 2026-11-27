@@ -74,7 +74,7 @@ export const CloudflareAIChat: React.FC<Props> = ({ project, onApplyProject }) =
   const apply = async () => { if (!proposal || applied || applying) return; setApplying(true); setError(''); try { await onApplyProject(proposal.project); setApplied(true); setProposal(null); setMessages(current => [...current, { role:'assistant', content:'Les modifications ont été enregistrées dans le projet Clarity. Vérifie le planning et les éléments mis à jour.' }]); } catch (err) { setError(err instanceof Error ? err.message : 'Échec de l’enregistrement de la proposition.'); } finally { setApplying(false); } };
   const discard = () => setProposal(null);
 
-  return <section className='flex min-h-[520px] flex-col overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-sm'>
+  return <section className='flex h-full min-h-0 flex-col overflow-hidden bg-white'>
     <div className='flex items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50 px-4 py-3'>
       <div className='flex items-center gap-2'><span className='rounded-lg bg-indigo-600 p-2 text-white'><Bot className='h-4 w-4' /></span><div><h3 className='text-sm font-bold text-slate-900'>Clarity AI — Agent de projet</h3><p className='text-[11px] text-slate-600'>Projet : {project.name} · {project.code}</p></div></div>
       <span className='flex items-center gap-1 text-[10px] font-semibold text-emerald-700'><ShieldCheck className='h-3 w-3'/> Validation obligatoire</span>
