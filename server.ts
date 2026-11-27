@@ -5,7 +5,6 @@ import fs from 'fs';
 import { inflateRawSync } from 'node:zlib';
 import * as XLSX from 'xlsx';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
 import { dbStore, getPgPool } from './src/db/dbClient';
 import { UserRole, AppUser } from './src/types';
 
@@ -81,53 +80,29 @@ const RBAC = {
 };
 
 
-// Initialize Gemini SDK lazily/safely
-let aiClient: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
+// Cloudflare Workers AI provider; the secret is held only by the Clarity server.
+async function callCloudflareAI(params: { prompt: string; isJson?: boolean }): Promise<string | null> {
+  const endpoint = process.env.CLOUDFLARE_AI_URL || 'https://ai.tfsn.dev/v1/chat';
+  const secret = process.env.CLOUDFLARE_AI_SECRET;
+  if (!secret) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ messages: [
+        { role: 'system', content: 'Tu es Clarity AI, expert en gestion de projets et pilotage de production. Réponds en français, n’invente aucune donnée et respecte le format demandé.' },
+        { role: 'user', content: params.prompt }
+      ], temperature: 0.15, max_tokens: params.isJson ? 1800 : 1400 }),
+      signal: controller.signal
     });
-  }
-  return aiClient;
-}
-
-// Resilient Gemini Execution Pipeline (Handles 503 / high-demand / fallback models)
-async function callGeminiResilient(
-  params: { prompt: string; isJson?: boolean }
-): Promise<string | null> {
-  const ai = getGeminiClient();
-  if (!ai) return null;
-
-  const candidateModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
-
-  for (const model of candidateModels) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: params.prompt,
-        config: params.isJson ? { responseMimeType: 'application/json' } : undefined,
-      });
-
-      if (response && response.text) {
-        return response.text;
-      }
-    } catch (_err) {
-      // Model temporarily busy or unavailable; smoothly advance to next candidate model
-      continue;
-    }
-  }
-
-  return null;
+    const data: any = await response.json().catch(() => ({}));
+    return response.ok && typeof data.response === 'string' && data.response.trim() ? data.response.trim() : null;
+  } catch (error: any) {
+    console.warn('Cloudflare Workers AI unavailable:', error?.name || 'unknown');
+    return null;
+  } finally { clearTimeout(timeout); }
 }
 
 // --- LOCAL AUTHENTICATION (PostgreSQL + opaque HttpOnly sessions) ---
@@ -282,6 +257,69 @@ app.use('/api', async (req: Request, res: Response, next) => {
   } catch (e) { next(e); }
 });
 
+
+/**
+ * Clarity AI gateway. The user is authenticated by the middleware above;
+ * the Cloudflare credential is server-side only and is never returned to clients.
+ */
+const aiRequestWindows = new Map<string, { count: number; resetAt: number }>();
+app.post('/api/ai/chat', async (req: Request, res: Response) => {
+  const actor = getUserFromRequest(req);
+  const now = Date.now();
+  const key = String(actor.id);
+  const window = aiRequestWindows.get(key);
+  if (window && window.resetAt > now && window.count >= 20) {
+    return res.status(429).json({ error: 'Limite de 20 demandes IA par minute atteinte. Réessayez dans un instant.' });
+  }
+  if (aiRequestWindows.size > 10000) {
+    for (const [id, value] of aiRequestWindows) if (value.resetAt <= now) aiRequestWindows.delete(id);
+  }
+  const messages = req.body?.messages;
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 12 ||
+      messages.some((m: any) => !m || !['user','assistant'].includes(m.role) ||
+        typeof m.content !== 'string' || !m.content.trim() || m.content.length > 8000)) {
+    return res.status(400).json({ error: 'Messages invalides : 1 à 12 messages, 8 000 caractères maximum par message.' });
+  }
+  if (messages.reduce((sum: number, m: any) => sum + m.content.length, 0) > 18000) {
+    return res.status(413).json({ error: 'Conversation trop volumineuse.' });
+  }
+  const endpoint = process.env.CLOUDFLARE_AI_URL || 'https://ai.tfsn.dev/v1/chat';
+  const secret = process.env.CLOUDFLARE_AI_SECRET;
+  if (!secret) return res.status(503).json({ error: 'Assistant IA non configuré : secret Cloudflare absent côté serveur.' });
+  const nextWindow = window && window.resetAt > now
+    ? { count: window.count + 1, resetAt: window.resetAt }
+    : { count: 1, resetAt: now + 60_000 };
+  aiRequestWindows.set(key, nextWindow);
+  const systemPrompt = [
+    'Tu es Clarity AI, assistant de pilotage de projets et de production.',
+    'Réponds en français, de façon structurée, factuelle et opérationnelle.',
+    'N’invente jamais de données, de références Change/RITM, de dates ou de statuts.',
+    'Tu ne disposes que des informations explicitement présentes dans la conversation.',
+    'Tu peux proposer des actions mais tu ne prétends jamais les avoir exécutées.',
+    'Ne demande jamais de mot de passe, cookie de session ou secret technique.'
+  ].join(' ');
+  const safeMessages = [{ role: 'system', content: systemPrompt }, ...messages];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ messages: safeMessages, temperature: 0.2, max_tokens: 1400 }),
+      signal: controller.signal
+    });
+    const result: any = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(response.status === 429 ? 429 : 503).json({ error: result.error || 'Service IA temporairement indisponible.' });
+    if (typeof result.response !== 'string' || !result.response.trim()) return res.status(502).json({ error: 'Réponse IA vide ou invalide.' });
+    return res.json({ success: true, response: result.response, model: result.model || 'Cloudflare Workers AI' });
+  } catch (error: any) {
+    console.warn('Cloudflare AI request failed:', error?.name || 'unknown');
+    return res.status(503).json({ error: 'Impossible de joindre le service IA. Vérifiez la configuration Cloudflare.' });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
 // Portfolio scopes are managed by the Director of Projects and persisted independently.
 app.get('/api/scopes', async (_req: Request, res: Response) => {
   const result = await getPgPool()!.query('SELECT scopes,revision,updated_at FROM portfolio_scope_state WHERE id=1');
@@ -343,9 +381,8 @@ app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
     const { fileName, fileBase64 } = req.body || {};
     if (typeof fileName !== 'string' || typeof fileBase64 !== 'string' || !fileBase64 || fileBase64.length > 16000000) return res.status(400).json({ error: 'Fichier manquant ou supérieur à 12 Mo.' });
     const ext = fileName.toLowerCase().split('.').pop();
-    if (!['xlsx','xls','csv','pptx','docx','pdf','txt'].includes(ext || '')) return res.status(415).json({ error: 'Formats acceptés : Excel, PowerPoint, Word, PDF, CSV et TXT.' });
-    const ai = getGeminiClient();
-    if (!ai) return res.status(503).json({ error: 'Service IA non configuré : vérifiez GEMINI_API_KEY.' });
+    if (!['xlsx','xls','csv','pptx','docx','txt'].includes(ext || '')) return res.status(415).json({ error: 'Formats acceptés : Excel, PowerPoint, Word et TXT. Le PDF nécessite une extraction OCR dédiée.' });
+    if (!process.env.CLOUDFLARE_AI_SECRET) return res.status(503).json({ error: 'Service IA non configuré : secret Cloudflare absent côté serveur.' });
     const buffer = Buffer.from(fileBase64, 'base64');
     if (!buffer.length || buffer.length > 12 * 1024 * 1024) return res.status(413).json({ error: 'Fichier vide ou supérieur à 12 Mo.' });
     let extracted = '';
@@ -354,14 +391,13 @@ app.post('/api/ai/extract-portfolio', async (req: Request, res: Response) => {
       const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
       extracted = workbook.SheetNames.map(name => 'FEUILLE: ' + name + '\n' + XLSX.utils.sheet_to_csv(workbook.Sheets[name])).join('\n\n');
     } else if (ext === 'csv' || ext === 'txt') extracted = buffer.toString('utf8');
-    else if (ext === 'pdf') parts.push({ inlineData: { mimeType: 'application/pdf', data: fileBase64 } });
     else if (ext === 'pptx') extracted = extractOfficeXml(buffer, /^ppt\/slides\/slide\d+\.xml$/).map(cleanOfficeXml).join('\n\n');
     else if (ext === 'docx') extracted = extractOfficeXml(buffer, /^word\/document\.xml$/).map(cleanOfficeXml).join('\n');
-    if (!parts.length && extracted.trim().length < 20) return res.status(422).json({ error: 'Aucun texte exploitable trouvé dans le fichier.' });
+    if (extracted.trim().length < 20) return res.status(422).json({ error: 'Aucun texte exploitable trouvé dans le fichier.' });
     const prompt = 'Analyse ce document pour Clarity PM. Retourne uniquement un JSON avec format clarity-ai-import, version 1, scopes[], projects[], meps[], coprojMeetings[], reviewItems[], sourceSummary. Chaque scope: code,name,description,trigrams[]. Chaque project: code,name,description,scopeCode,trigrams[]. Chaque MEP: ref,title,projectCode,trigrams[],version,date,owner,environment,status,priority,changeNumbers[],ritmNumbers[],description,rollback,people[],tasks[],runbook{prerequisites[],executionSteps[]}. Chaque COPROJ: projectCode,date,subject,attendees[],summary,decisions[],actions[{title,owner,dueDate,status}],risks[]. Le Directeur de projets crée les périmètres. Un périmètre contient plusieurs trigrammes et projets. Une MEP peut porter plusieurs trigrammes. COPROJ est rattaché au projet, jamais à une MEP. ServiceNow est manuel, ne prétends pas vérifier les tickets. N’invente rien : place les données incertaines dans reviewItems. Conserve exactement les références CHG et RITM. Ne confonds pas code application et trigramme.\n\n' + extracted;
-    parts.unshift({ text: prompt });
-    const response = await ai.models.generateContent({ model: 'gemini-3.7-flash', contents: [{ role: 'user', parts }], config: { responseMimeType: 'application/json' } });
-    const raw = (response.text || '').replace(/^\s*```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
+    const rawResponse = await callCloudflareAI({ prompt, isJson: true });
+    if (!rawResponse) return res.status(503).json({ error: 'Cloudflare Workers AI indisponible ou quota gratuit atteint.' });
+    const raw = rawResponse.replace(/^\s*```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
     const draft = JSON.parse(raw);
     if (draft.format !== 'clarity-ai-import' || !Array.isArray(draft.scopes) || !Array.isArray(draft.projects) || !Array.isArray(draft.meps) || !Array.isArray(draft.coprojMeetings)) throw new Error('Le résultat IA ne respecte pas le schéma Clarity.');
     res.json({ success: true, draft, sourceFile: fileName, requiresReview: true });
@@ -579,10 +615,10 @@ app.post('/api/admin/postgres/test-connection', async (_req: Request, res: Respo
 });
 
 app.post('/api/admin/copilot/test', async (req: Request, res: Response) => {
-  const { model = 'gemini-3.7-flash' } = req.body || {};
+  const { model = 'Cloudflare Workers AI' } = req.body || {};
   const testPrompt = 'Réponds uniquement par le mot "OPÉRATIONNEL" en français.';
   const start = Date.now();
-  const reply = await callGeminiResilient({ prompt: testPrompt });
+  const reply = await callCloudflareAI({ prompt: testPrompt });
   const latencyMs = Date.now() - start;
 
   if (!reply) return res.status(503).json({success:false,error:'Le service IA n’a pas répondu. Vérifiez la clé API et la disponibilité du fournisseur.'});
@@ -590,86 +626,11 @@ app.post('/api/admin/copilot/test', async (req: Request, res: Response) => {
 });
 
 
-// API: Audio Transcription powered by model 'gemini-3.5-transcribe'
-app.post('/api/transcribe', async (req: Request, res: Response) => {
-  try {
-    const { audioBase64, mimeType = 'audio/webm' } = req.body || {};
-    if (!audioBase64) {
-      return res.status(400).json({ success: false, error: 'Aucun enregistrement audio transmis.' });
-    }
-
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.json({
-        success: true,
-        text: 'Cadrage fonctionnel et spécifications techniques validées pour la nouvelle version.',
-        simulated: true,
-      });
-    }
-
-    const cleanBase64 = audioBase64.includes(',') ? audioBase64.split(',')[1] : audioBase64;
-    const cleanMime = (mimeType.split(';')[0] || 'audio/webm').trim();
-
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.5-transcribe',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: cleanMime,
-                  data: cleanBase64,
-                },
-              },
-              {
-                text: 'Transcribe the audio precisely in French. Provide only the clear text transcription without formatting, preamble, quotation marks or comments.',
-              },
-            ],
-          },
-        ],
-      });
-
-      const transcription = response?.text?.trim() || '';
-      return res.json({ success: true, text: transcription });
-    } catch (modelErr: any) {
-      console.warn('gemini-3.5-transcribe primary invocation error:', modelErr?.message);
-      // Secondary fallback with gemini-3.1-flash-lite
-      try {
-        const fbRes = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: cleanMime,
-                    data: cleanBase64,
-                  },
-                },
-                {
-                  text: 'Transcris fidèlement ce message audio en texte brut.',
-                },
-              ],
-            },
-          ],
-        });
-        const fbText = fbRes?.text?.trim() || '';
-        return res.json({ success: true, text: fbText });
-      } catch (fbErr: any) {
-        return res.status(500).json({ 
-          success: false, 
-          error: `Erreur transcription: ${modelErr?.message || fbErr?.message}` 
-        });
-      }
-    }
-  } catch (err: any) {
-    console.error('Audio transcribe error:', err);
-    return res.status(500).json({ success: false, error: err.message || 'Erreur lors du traitement audio' });
-  }
-});
+// A chat model is not a speech-to-text model. Never return simulated transcripts.
+app.post('/api/transcribe', async (_req: Request, res: Response) => res.status(501).json({
+  success: false,
+  error: 'La transcription audio nécessite un moteur Speech-to-Text dédié. Aucun texte simulé ne sera retourné.'
+}));
 
 // ====================================================================
 // --- PRODUCTION REST API WITH RBAC FOR ALL PM ENTITIES ---
@@ -1019,7 +980,7 @@ Réponds en JSON valide :
 }
 `;
 
-  const text = await callGeminiResilient({ prompt, isJson: true });
+  const text = await callCloudflareAI({ prompt, isJson: true });
   if (text) {
     try {
       const parsed = JSON.parse(text);
@@ -1090,7 +1051,7 @@ Structure attendue :
 
 Sois précis, orienté production et factuel. Ne crée aucune donnée absente.`;
 
-  const report = await callGeminiResilient({ prompt });
+  const report = await callCloudflareAI({ prompt });
   if (report) {
     return res.json({ reportMarkdown: report });
   }
@@ -1130,7 +1091,7 @@ Format JSON attendu :
   ]
 }`;
 
-  const text = await callGeminiResilient({ prompt, isJson: true });
+  const text = await callCloudflareAI({ prompt, isJson: true });
   if (text) {
     try {
       const parsed = JSON.parse(text);
