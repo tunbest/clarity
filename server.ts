@@ -15,7 +15,7 @@ const PORT = 3000;
 app.disable('x-powered-by');
 app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store, max-age=0');
+  if (req.path.startsWith('/api/') || req.path === '/redirect.html') res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'DENY');
