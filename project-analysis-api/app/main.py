@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from typing import Literal
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -147,7 +148,7 @@ async def health():
 def calculate_health(project: ProjectInput, assessment: ModelAssessment) -> tuple[int, str, list[str]]:
     score = 100
     reasons: list[str] = []
-    today = date.today()
+    today = datetime.now(ZoneInfo('Europe/Paris')).date()
     tasks = project.tasks
     milestones = project.milestones
 
