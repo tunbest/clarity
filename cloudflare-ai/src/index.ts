@@ -44,9 +44,31 @@ export default {
         temperature: Math.min(1, Math.max(0, Number(body.temperature ?? 0.2))),
         max_tokens: Math.min(1800, Math.max(100, Number(body.max_tokens ?? 1200))),
       });
-      const response = typeof result === "string" ? result :
-        (result as any)?.response || (result as any)?.result || "";
-      if (!response) return json({ error: "The AI provider returned an empty response." }, 502);
+      const output: any = result as any;
+      const candidates = [
+        typeof result === "string" ? result : undefined,
+        output?.response,
+        output?.result,
+        output?.content,
+        output?.output_text,
+        output?.choices?.[0]?.message?.content,
+        output?.result?.response,
+        output?.result?.content,
+      ];
+      const response = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
+      if (!response) {
+        // Return shape metadata only: never expose prompts, credentials, or model internals.
+        console.error("Workers AI returned an unrecognized/empty payload", {
+          resultType: typeof result,
+          resultKeys: output && typeof output === "object" ? Object.keys(output).slice(0, 20) : [],
+          nestedResultKeys: output?.result && typeof output.result === "object" ? Object.keys(output.result).slice(0, 20) : [],
+        });
+        return json({
+          error: "Workers AI returned no text content.",
+          resultType: typeof result,
+          resultKeys: output && typeof output === "object" ? Object.keys(output).slice(0, 20) : [],
+        }, 502);
+      }
       return json({ success: true, model: env.AI_MODEL || "@cf/zai-org/glm-4.7-flash", response });
     } catch (error) {
       console.error("Workers AI invocation failed", error);
