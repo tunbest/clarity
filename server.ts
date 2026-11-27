@@ -776,7 +776,7 @@ app.get('/api/admin/gemini/status', async (req: Request, res: Response) => {
 app.put('/api/admin/gemini/key', async (req: Request, res: Response) => {
   if (!requireSystemAdmin(req, res)) return;
   const apiKey = String(req.body?.apiKey || '').trim();
-  if (apiKey.length < 20 || apiKey.length > 512 || /\\s/.test(apiKey)) return res.status(400).json({ error: 'Clé API invalide.' });
+  if (apiKey.length < 20 || apiKey.length > 512 || /\s/.test(apiKey)) return res.status(400).json({ error: 'Clé API invalide.' });
   try {
     const encrypted = encryptIntegrationSecret(apiKey);
     const actor = (req as any).authUser as AppUser;
@@ -809,7 +809,7 @@ app.post('/api/admin/gemini/test', async (req: Request, res: Response) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetch((process.env.PROJECT_ANALYSIS_API_URL || 'http://project-analysis-api:8000').replace(/\\/$/, '') + '/test-gemini', {
+    const response = await fetch((process.env.PROJECT_ANALYSIS_API_URL || 'http://project-analysis-api:8000').replace(/\/$/, '') + '/test-gemini', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': serviceKey, 'x-gemini-key': apiKey },
       body: JSON.stringify({}),
