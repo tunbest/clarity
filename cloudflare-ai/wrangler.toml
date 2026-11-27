@@ -2,8 +2,8 @@ name = "clarity-ai"
 main = "src/index.ts"
 compatibility_date = "2026-11-27"
 
-[vars]
-AI_MODEL = "claude-haiku-5-5"
+[ai]
+binding = "AI"
 
 [[routes]]
 pattern = "ai.tfsn.dev"
