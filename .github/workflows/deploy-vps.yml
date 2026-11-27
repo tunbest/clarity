@@ -72,7 +72,7 @@ jobs:
           grep -q '^CLOUDFLARE_AI_URL=.' "$STACK_DIR/.env" || { echo "CLOUDFLARE_AI_URL is missing from production .env." >&2; exit 1; }
           # Generate one stable, private service-to-service API key if not provisioned yet.
           if ! grep -q '^PROJECT_ANALYSIS_API_KEY=.' "$STACK_DIR/.env"; then
-            printf '\\nPROJECT_ANALYSIS_API_KEY=%s\\n' "$(openssl rand -hex 32)" >> "$STACK_DIR/.env"
+            echo "PROJECT_ANALYSIS_API_KEY=$(openssl rand -hex 32)" >> "$STACK_DIR/.env"
             chmod 600 "$STACK_DIR/.env"
           fi
           test -f "$STACK_DIR/db-init/01-create-app-role.sh" || test -f "$STACK_DIR/db-init/sync-app-role.sh" || { echo "Database role initialization/sync script is missing." >&2; exit 1; }
