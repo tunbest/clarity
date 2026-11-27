@@ -768,9 +768,14 @@ function requireSystemAdmin(req: Request, res: Response): boolean {
 
 app.get('/api/admin/gemini/status', async (req: Request, res: Response) => {
   if (!requireSystemAdmin(req, res)) return;
-  const result = await getPgPool()!.query("SELECT updated_at FROM integration_secrets WHERE provider='google-gemini'");
-  res.setHeader('Cache-Control', 'no-store');
-  res.json({ configured: Boolean(result.rowCount), provider: 'Google Gemini Flash', updatedAt: result.rows[0]?.updated_at || null });
+  try {
+    const result = await getPgPool()!.query("SELECT updated_at FROM integration_secrets WHERE provider='google-gemini'");
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ configured: Boolean(result.rowCount), provider: 'Google Gemini Flash', updatedAt: result.rows[0]?.updated_at || null });
+  } catch (error: any) {
+    console.error('Gemini status lookup failed:', error?.message || 'unknown');
+    return res.status(503).json({ error: 'Impossible de lire la configuration Gemini dans PostgreSQL.' });
+  }
 });
 
 app.put('/api/admin/gemini/key', async (req: Request, res: Response) => {
@@ -1371,6 +1376,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
+    // Unknown API paths must remain JSON; never return the SPA index.html to fetch() callers.
+    app.use('/api', (req: Request, res: Response) => {
+      res.status(404).json({ error: `Route API inconnue: ${req.method} ${req.originalUrl}` });
+    });
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req: Request, res: Response) => {
