@@ -46,6 +46,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLARITY_AI_SECRET: ${{ secrets.CLARITY_AI_SECRET }}
         run: |
+          # Remove accidental CR/LF characters copied with GitHub Actions secrets before Wrangler creates HTTP headers.
+          CLOUDFLARE_API_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '\r\n')"
+          CLOUDFLARE_ACCOUNT_ID="$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '\r\n')"
+          CLARITY_AI_SECRET="$(printf '%s' "$CLARITY_AI_SECRET" | tr -d '\r\n')"
+          export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
           printf '%s' "$CLARITY_AI_SECRET" | wrangler secret put CLARITY_AI_SECRET --config wrangler.toml
 
       - name: Deploy Worker
