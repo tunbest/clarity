@@ -237,6 +237,16 @@ export const App: React.FC = () => {
     setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
   };
 
+  const handleApplyAIProject = async (updated: Project) => {
+    await workspaceWriteQueue.current;
+    const response = await fetch('/api/ai/agent/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ projectId: updated.id, project: updated, revision: workspaceRevisionRef.current }) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.project) throw new Error(result.error || 'Enregistrement des modifications IA impossible.');
+    workspaceRevisionRef.current = Number(result.revision) || workspaceRevisionRef.current + 1;
+    setProjects((current) => current.map((project) => project.id === updated.id ? result.project : project));
+    setWorkspaceError(null);
+  };
+
   const handleSaveProject = (savedProj: Project) => {
     const exists = projects.some((p) => p.id === savedProj.id);
     if (exists) {
@@ -689,7 +699,7 @@ export const App: React.FC = () => {
           project={activeProject}
           metrics={metrics}
           onClose={() => setIsAIAssistantOpen(false)}
-          onAddTasksToProject={handleAddTasksFromAI}
+          onApplyProject={handleApplyAIProject}
         />
       )}
 
