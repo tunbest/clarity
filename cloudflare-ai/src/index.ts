@@ -1,5 +1,7 @@
+interface AiBinding { run(model: string, inputs: Record<string, unknown>): Promise<unknown>; }
+
 export interface Env {
-  AI: Ai;
+  AI: AiBinding;
   CLARITY_AI_SECRET: string;
   AI_MODEL?: string;
 }
