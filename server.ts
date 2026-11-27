@@ -980,7 +980,7 @@ Réponds en JSON valide :
 }
 `;
 
-  const text = await callGeminiResilient({ prompt, isJson: true });
+  const text = await callCloudflareAI({ prompt, isJson: true });
   if (text) {
     try {
       const parsed = JSON.parse(text);
@@ -1051,7 +1051,7 @@ Structure attendue :
 
 Sois précis, orienté production et factuel. Ne crée aucune donnée absente.`;
 
-  const report = await callGeminiResilient({ prompt });
+  const report = await callCloudflareAI({ prompt });
   if (report) {
     return res.json({ reportMarkdown: report });
   }
@@ -1091,7 +1091,7 @@ Format JSON attendu :
   ]
 }`;
 
-  const text = await callGeminiResilient({ prompt, isJson: true });
+  const text = await callCloudflareAI({ prompt, isJson: true });
   if (text) {
     try {
       const parsed = JSON.parse(text);
