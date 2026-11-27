@@ -4,9 +4,7 @@ WORKDIR /app
 COPY package.json ./
 RUN bun install
 COPY . .
-ARG VITE_MICROSOFT_CLIENT_ID=""
-ARG VITE_MICROSOFT_TENANT_ID="organizations"
-ENV NODE_ENV=production VITE_MICROSOFT_CLIENT_ID=$VITE_MICROSOFT_CLIENT_ID VITE_MICROSOFT_TENANT_ID=$VITE_MICROSOFT_TENANT_ID
+ENV NODE_ENV=production
 RUN bun run build
 
 # Runtime dependencies only.
