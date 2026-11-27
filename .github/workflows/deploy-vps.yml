@@ -80,7 +80,14 @@ jobs:
           chmod 600 "$STACK_DIR/.env"
           # Stable master key for AES-256-GCM encrypted integration credentials.
           # Generate it once; never rotate it automatically or existing encrypted keys become unreadable.
-          if ! grep -Eq '^CLARITY_SECRETS_ENCRYPTION_KEY=[a-f0-9]{64}
+          if ! grep -Eq '^CLARITY_SECRETS_ENCRYPTION_KEY=[a-f0-9]{64}$' "$STACK_DIR/.env"; then
+            ENV_TMP="$(mktemp)"
+            grep -v '^CLARITY_SECRETS_ENCRYPTION_KEY=' "$STACK_DIR/.env" > "$ENV_TMP" || true
+            printf 'CLARITY_SECRETS_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)" >> "$ENV_TMP"
+            cat "$ENV_TMP" > "$STACK_DIR/.env"
+            rm -f "$ENV_TMP"
+            chmod 600 "$STACK_DIR/.env"
+          fi
           test -f "$STACK_DIR/db-init/01-create-app-role.sh" || test -f "$STACK_DIR/db-init/sync-app-role.sh" || { echo "Database role initialization/sync script is missing." >&2; exit 1; }
           docker network inspect shared_network >/dev/null 2>&1 || { echo "External Docker network shared_network is missing." >&2; exit 1; }
 
