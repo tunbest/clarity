@@ -18,7 +18,7 @@ La connexion ne donne pas à Clarity accès au moteur Copilot, aux données Micr
 1. Dans le centre d'administration Microsoft Entra, créer une inscription d'application dédiée à Clarity PM.
 2. Choisir les types de comptes « Comptes dans un annuaire organisationnel » (single tenant recommandé pour une entreprise) ou « Comptes dans tout annuaire organisationnel ».
 3. Dans **Authentification**, ajouter une plateforme **Application monopage (SPA)**.
-4. Ajouter l'URI de redirection exacte : `https://VOTRE-DOMAINE/auth/popup.html`.
+4. Ajouter l'URI de redirection exacte : `https://VOTRE-DOMAINE/redirect.html`.
 5. Ne créer aucun secret client pour cette SPA.
 6. Aucun droit Microsoft Graph n'est nécessaire pour cette simple connexion OpenID Connect.
 7. Renseigner les variables de build :
