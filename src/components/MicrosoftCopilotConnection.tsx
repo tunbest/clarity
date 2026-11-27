@@ -28,7 +28,7 @@ export const MicrosoftCopilotConnection: React.FC = () => {
         clientId: MICROSOFT_CLIENT_ID,
         authority: MICROSOFT_AUTHORITY,
         redirectUri: MICROSOFT_REDIRECT_URI,
-        postLogoutRedirectUri: window.location.origin,
+        postLogoutRedirectUri: MICROSOFT_REDIRECT_URI,
       },
       cache: {
         cacheLocation: 'localStorage',
