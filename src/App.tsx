@@ -28,6 +28,7 @@ import { AdminPage } from './components/AdminPage';
 import { ContributorPortal } from './components/ContributorPortal';
 import { ProductionReleasePortal } from './components/ProductionReleasePortal';
 import { CoprojPortal } from './components/CoprojPortal';
+import { MicrosoftCopilotConnection } from './components/MicrosoftCopilotConnection';
 
 // Modals
 import { AIAssistantModal } from './components/AIAssistantModal';
@@ -555,6 +556,8 @@ export const App: React.FC = () => {
         isPortfolioView={activeTab === 'PORTFOLIO'}
         onTogglePortfolioView={(isPortfolio) => setActiveTab(isPortfolio ? 'PORTFOLIO' : 'DASHBOARD')}
       />
+
+      <MicrosoftCopilotConnection />
 
       {workspaceError && <div className="mx-auto mt-3 w-full max-w-7xl px-4"><div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{workspaceError}</div></div>}
 
