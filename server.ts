@@ -282,6 +282,69 @@ app.use('/api', async (req: Request, res: Response, next) => {
   } catch (e) { next(e); }
 });
 
+
+/**
+ * Clarity AI gateway. The user is authenticated by the middleware above;
+ * the Cloudflare credential is server-side only and is never returned to clients.
+ */
+const aiRequestWindows = new Map<string, { count: number; resetAt: number }>();
+app.post('/api/ai/chat', async (req: Request, res: Response) => {
+  const actor = getUserFromRequest(req);
+  const now = Date.now();
+  const key = String(actor.id);
+  const window = aiRequestWindows.get(key);
+  if (window && window.resetAt > now && window.count >= 20) {
+    return res.status(429).json({ error: 'Limite de 20 demandes IA par minute atteinte. Réessayez dans un instant.' });
+  }
+  if (aiRequestWindows.size > 10000) {
+    for (const [id, value] of aiRequestWindows) if (value.resetAt <= now) aiRequestWindows.delete(id);
+  }
+  const messages = req.body?.messages;
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 12 ||
+      messages.some((m: any) => !m || !['user','assistant'].includes(m.role) ||
+        typeof m.content !== 'string' || !m.content.trim() || m.content.length > 8000)) {
+    return res.status(400).json({ error: 'Messages invalides : 1 à 12 messages, 8 000 caractères maximum par message.' });
+  }
+  if (messages.reduce((sum: number, m: any) => sum + m.content.length, 0) > 18000) {
+    return res.status(413).json({ error: 'Conversation trop volumineuse.' });
+  }
+  const endpoint = process.env.CLOUDFLARE_AI_URL || 'https://ai.tfsn.dev/v1/chat';
+  const secret = process.env.CLOUDFLARE_AI_SECRET;
+  if (!secret) return res.status(503).json({ error: 'Assistant IA non configuré : secret Cloudflare absent côté serveur.' });
+  const nextWindow = window && window.resetAt > now
+    ? { count: window.count + 1, resetAt: window.resetAt }
+    : { count: 1, resetAt: now + 60_000 };
+  aiRequestWindows.set(key, nextWindow);
+  const systemPrompt = [
+    'Tu es Clarity AI, assistant de pilotage de projets et de production.',
+    'Réponds en français, de façon structurée, factuelle et opérationnelle.',
+    'N’invente jamais de données, de références Change/RITM, de dates ou de statuts.',
+    'Tu ne disposes que des informations explicitement présentes dans la conversation.',
+    'Tu peux proposer des actions mais tu ne prétends jamais les avoir exécutées.',
+    'Ne demande jamais de mot de passe, cookie de session ou secret technique.'
+  ].join(' ');
+  const safeMessages = [{ role: 'system', content: systemPrompt }, ...messages];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ messages: safeMessages, temperature: 0.2, max_tokens: 1400 }),
+      signal: controller.signal
+    });
+    const result: any = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(response.status === 429 ? 429 : 503).json({ error: result.error || 'Service IA temporairement indisponible.' });
+    if (typeof result.response !== 'string' || !result.response.trim()) return res.status(502).json({ error: 'Réponse IA vide ou invalide.' });
+    return res.json({ success: true, response: result.response, model: result.model || 'Cloudflare Workers AI' });
+  } catch (error: any) {
+    console.warn('Cloudflare AI request failed:', error?.name || 'unknown');
+    return res.status(503).json({ error: 'Impossible de joindre le service IA. Vérifiez la configuration Cloudflare.' });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
 // Portfolio scopes are managed by the Director of Projects and persisted independently.
 app.get('/api/scopes', async (_req: Request, res: Response) => {
   const result = await getPgPool()!.query('SELECT scopes,revision,updated_at FROM portfolio_scope_state WHERE id=1');
