@@ -70,11 +70,14 @@ jobs:
           test -f "$STACK_DIR/.env" || { echo "Production environment file is missing." >&2; exit 1; }
           grep -q '^CLOUDFLARE_AI_SECRET=.' "$STACK_DIR/.env" || { echo "CLOUDFLARE_AI_SECRET is missing from production .env." >&2; exit 1; }
           grep -q '^CLOUDFLARE_AI_URL=.' "$STACK_DIR/.env" || { echo "CLOUDFLARE_AI_URL is missing from production .env." >&2; exit 1; }
-          # Generate one stable, private service-to-service API key if not provisioned yet.
-          if ! grep -q '^PROJECT_ANALYSIS_API_KEY=.' "$STACK_DIR/.env"; then
-            echo "PROJECT_ANALYSIS_API_KEY=$(openssl rand -hex 32)" >> "$STACK_DIR/.env"
-            chmod 600 "$STACK_DIR/.env"
-          fi
+          # Rotate the private service-to-service key on every deployment.
+          # Remove malformed/duplicate entries left by any interrupted previous run.
+          ENV_TMP="$(mktemp)"
+          grep -v 'PROJECT_ANALYSIS_API_KEY' "$STACK_DIR/.env" > "$ENV_TMP" || true
+          printf 'PROJECT_ANALYSIS_API_KEY=%s\n' "$(openssl rand -hex 32)" >> "$ENV_TMP"
+          cat "$ENV_TMP" > "$STACK_DIR/.env"
+          rm -f "$ENV_TMP"
+          chmod 600 "$STACK_DIR/.env"
           test -f "$STACK_DIR/db-init/01-create-app-role.sh" || test -f "$STACK_DIR/db-init/sync-app-role.sh" || { echo "Database role initialization/sync script is missing." >&2; exit 1; }
           docker network inspect shared_network >/dev/null 2>&1 || { echo "External Docker network shared_network is missing." >&2; exit 1; }
 
