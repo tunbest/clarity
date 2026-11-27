@@ -286,6 +286,50 @@ app.post('/api/ai/agent/plan', async (req: Request, res: Response) => {
     return res.json({ success:true, message:parsed.message, changes:parsed.changes, projectId, workspaceRevision:Number(snapshot.rows[0]?.revision||1), requiresApproval:true });
   } catch (error:any) { console.warn('Invalid AI agent proposal:', error?.message||error); return res.status(502).json({ error:'Proposition IA invalide. Aucune modification effectuée.' }); }
 });
+// Persist only the human-approved, allow-listed project changes with optimistic concurrency.
+app.post('/api/ai/agent/apply', async (req: Request, res: Response) => {
+  const actor = getUserFromRequest(req);
+  const projectId = String(req.body?.projectId || '');
+  const submitted = req.body?.project;
+  const revision = Number(req.body?.revision);
+  if (!projectId || !submitted || typeof submitted !== 'object' || submitted.id !== projectId || !Number.isSafeInteger(revision) || revision < 1) return res.status(400).json({ error:'Validation de la proposition invalide.' });
+  const pool = getPgPool()!; const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query('SELECT projects,revision FROM workspace_state WHERE id=1 FOR UPDATE');
+    if (!result.rowCount || Number(result.rows[0].revision) !== revision) { await client.query('ROLLBACK'); return res.status(409).json({ error:'Le projet a changé depuis la préparation. Recharge les données et demande une nouvelle proposition.' }); }
+    const all: any[] = result.rows[0].projects || []; const index = all.findIndex((p:any)=>String(p.id)===projectId); const current = all[index];
+    if (!current || !isProjectVisibleToUser(current,actor)) { await client.query('ROLLBACK'); return res.status(404).json({error:'Projet introuvable ou non accessible.'}); }
+    const allowedProjectRoles = ['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','PMO'];
+    const metadataFields = ['name','description','status','priority','startDate','endDate'];
+    const changedMetadata = metadataFields.some((key:string)=>JSON.stringify(current[key])!==JSON.stringify(submitted[key]));
+    const collections = ['tasks','milestones','risks'];
+    for (const key of ['id','code','scopeId','trigrams','managerId','managerName','members','methodology','client','kpiWidgets','createdAt']) if (JSON.stringify(current[key]) !== JSON.stringify(submitted[key])) { await client.query('ROLLBACK'); return res.status(400).json({error:'La proposition tente de modifier un champ protégé.'}); }
+    if (changedMetadata && !allowedProjectRoles.includes(actor.role)) { await client.query('ROLLBACK'); return res.status(403).json({error:'Votre rôle ne permet pas de modifier les informations générales du projet.'}); }
+    const tasksChanged = JSON.stringify(current.tasks||[]) !== JSON.stringify(submitted.tasks||[]);
+    const risksChanged = JSON.stringify(current.risks||[]) !== JSON.stringify(submitted.risks||[]);
+    const milestonesChanged = JSON.stringify(current.milestones||[]) !== JSON.stringify(submitted.milestones||[]);
+    if (tasksChanged && !RBAC.canManageTasks(actor.role)) { await client.query('ROLLBACK'); return res.status(403).json({error:'Votre rôle ne permet pas de modifier les tâches.'}); }
+    if (risksChanged && !RBAC.canManageRisks(actor.role)) { await client.query('ROLLBACK'); return res.status(403).json({error:'Votre rôle ne permet pas de modifier les risques.'}); }
+    if (milestonesChanged && !['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','CHEF_PROJET_PROD','PMO'].includes(actor.role)) { await client.query('ROLLBACK'); return res.status(403).json({error:'Votre rôle ne permet pas de modifier les jalons.'}); }
+    const validateCollection = (before:any[], after:any[], allowed:string[], required:string[]) => {
+      if (!Array.isArray(after) || after.length < before.length || after.length > before.length + 30) return false;
+      const oldById = new Map(before.map((x:any)=>[String(x.id),x]));
+      for (const item of after) { if (!item || typeof item.id !== 'string') return false; const old:any = oldById.get(item.id); const keys = Object.keys(item); if (keys.some((k:string)=>!['id','projectId',...allowed].includes(k))) return false; if (old) { if (item.projectId !== old.projectId || allowed.some((k:string)=>JSON.stringify(item[k])!==JSON.stringify(old[k])) === false && JSON.stringify(item)!==JSON.stringify(old)) return false; oldById.delete(item.id); } else if (required.some((k:string)=>!String(item[k] ?? '').trim())) return false; }
+      return oldById.size === 0;
+    };
+    if (tasksChanged && !validateCollection(current.tasks||[],submitted.tasks||[],['title','description','status','priority','startDate','dueDate','estimatedHours','actualHours','completionPercent','category','tags'],['title','startDate','dueDate'])) { await client.query('ROLLBACK'); return res.status(400).json({error:'Modifications de tâches non autorisées ou invalides.'}); }
+    if (milestonesChanged && !validateCollection(current.milestones||[],submitted.milestones||[],['title','targetDate','completed','description','actualDate','deliverable','deliverables'],['title','targetDate'])) { await client.query('ROLLBACK'); return res.status(400).json({error:'Modifications de jalons non autorisées ou invalides.'}); }
+    if (risksChanged && !validateCollection(current.risks||[],submitted.risks||[],['title','description','category','probability','impact','mitigationPlan','contingencyPlan','ownerId','status','identifiedDate'],['title','mitigationPlan'])) { await client.query('ROLLBACK'); return res.status(400).json({error:'Modifications de risques non autorisées ou invalides.'}); }
+    const updated = { ...current, ...Object.fromEntries(metadataFields.map((key:string)=>[key,submitted[key]])), tasks:submitted.tasks||current.tasks||[], milestones:submitted.milestones||current.milestones||[], risks:submitted.risks||current.risks||[], updatedAt:new Date().toISOString() };
+    all[index] = updated;
+    const saved = await client.query('UPDATE workspace_state SET projects=$1::jsonb,revision=revision+1,updated_at=NOW() WHERE id=1 AND revision=$2 RETURNING revision',[JSON.stringify(all),revision]);
+    if (!saved.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({error:'Conflit de sauvegarde. Recharge le projet.'}); }
+    await client.query('COMMIT');
+    return res.json({success:true,project:stripFinancialFields(updated),revision:Number(saved.rows[0].revision)});
+  } catch (error:any) { await client.query('ROLLBACK'); console.error('AI agent apply failed:',error?.message||error); return res.status(500).json({error:'Impossible d’enregistrer la proposition.'}); }
+  finally { client.release(); }
+});
 /**
  * Clarity AI gateway. The user is authenticated by the middleware above;
  * the Cloudflare credential is server-side only and is never returned to clients.
