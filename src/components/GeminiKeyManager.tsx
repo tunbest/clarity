@@ -7,7 +7,7 @@ async function readApiResponse(response: Response): Promise<any> {
   const contentType = response.headers.get('content-type') || '';
   const raw = await response.text();
   if (!contentType.toLowerCase().includes('application/json')) {
-    const isHtml = /^\\s*<!doctype html|^\\s*<html/i.test(raw);
+    const isHtml = /^\s*<!doctype html|^\s*<html/i.test(raw);
     throw new Error(isHtml
       ? `L'API Clarity n'a pas répondu en JSON (HTTP ${response.status}). La route Gemini n'est probablement pas déployée ou la requête est redirigée vers l'interface web.`
       : `Réponse API inattendue (HTTP ${response.status}, ${contentType || 'type inconnu'}).`);
