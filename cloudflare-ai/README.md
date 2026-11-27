@@ -2,31 +2,36 @@
 
 This Worker is the private AI inference gateway for Clarity PM. It is not exposed to browsers: Clarity's Express server calls it with a server-side bearer secret.
 
-## Deploy
+## Automated deployment through GitHub Actions
 
-1. Install Wrangler locally: `bunx wrangler login`
-2. From this directory, create the secret:
-   `bunx wrangler secret put CLARITY_AI_SECRET`
-   Use a random secret of at least 32 bytes. Configure the identical value as `CLOUDFLARE_AI_SECRET` in the Clarity production environment.
-3. Deploy: `bunx wrangler deploy`
-4. In Cloudflare DNS, make sure `ai.tfsn.dev` is available for the Worker custom domain. Wrangler will provision the route.
+The repository workflow `.github/workflows/deploy-cloudflare-ai.yml` deploys this Worker when changes to `cloudflare-ai/**` are pushed to `main`, or when manually started from the Actions tab.
+
+Configure these repository Actions secrets:
+
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with the minimum permissions required to deploy Workers and configure the custom domain.
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare Account ID.
+- `CLARITY_AI_SECRET`: a random secret of at least 32 bytes.
+
+The workflow writes `CLARITY_AI_SECRET` to the Worker using Wrangler and deploys `ai.tfsn.dev`. Do not put secrets in source files, frontend variables, or logs.
 
 ## Clarity server environment
 
+Configure these on the Clarity production server (Azure), not only in GitHub:
+
 ```env
 CLOUDFLARE_AI_URL=https://ai.tfsn.dev/v1/chat
-CLOUDFLARE_AI_SECRET=<same-secret-as-worker>
+CLOUDFLARE_AI_SECRET=<same-value-as-GitHub-CLARITY_AI_SECRET>
 ```
 
-Do not put either secret in Vite variables, frontend code, Git, or logs.
+Restart/redeploy the Clarity application after changing its server environment. The secret must match the Worker secret exactly.
+
+## Model and free allocation
+
+The default model is `@cf/zai-org/glm-4.7-flash`. Workers AI has a daily free allocation on eligible plans; quotas, model availability, and pricing can change, so check the Cloudflare dashboard before production use. The Worker returns an error on provider/quota failures and never fabricates a successful answer.
 
 ## Endpoint
 
 `POST /v1/chat` accepts a JSON body with `messages` (system/user/assistant). Requests require the bearer secret. The Worker limits message count, message size, total prompt size, and output tokens.
-
-## Free usage
-
-Workers AI includes a daily free allocation (currently 10,000 Neurons/day on the Free plan). Model availability, quotas, and pricing can change; check the Cloudflare dashboard before production use. This Worker returns 503 on provider/quota failures and never fabricates a successful answer.
 
 ## Data handling
 
