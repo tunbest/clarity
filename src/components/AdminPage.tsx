@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { GeminiKeyManager } from './GeminiKeyManager';
 import { 
   ShieldCheck, 
   Database, 
@@ -888,6 +889,7 @@ CREATE OR REPLACE VIEW view_portfolio_summary AS SELECT p.id, p.name, AVG(t.prog
       {/* TAB 4: IA COPILOT API CONFIGURATION */}
       {activeSubTab === 'COPILOT' && (
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xs space-y-6">
+          <GeminiKeyManager />
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-purple-100 text-purple-700 rounded-2xl">
