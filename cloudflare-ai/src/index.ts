@@ -1,13 +1,12 @@
-interface AiBinding { run(model: string, inputs: Record<string, unknown>): Promise<unknown>; }
-
 export interface Env {
-  AI: AiBinding;
   CLARITY_AI_SECRET: string;
+  ANTHROPIC_API_KEY: string;
   AI_MODEL?: string;
 }
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
+const MODEL = "claude-haiku-5-5";
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -18,7 +17,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
-      return json({ status: "ok", provider: "cloudflare-workers-ai" });
+      return json({ status: "ok", provider: "anthropic", model: MODEL });
     }
     if (request.method !== "POST" || url.pathname !== "/v1/chat") {
       return json({ error: "Not found" }, 404);
@@ -26,8 +25,12 @@ export default {
     if (!env.CLARITY_AI_SECRET || request.headers.get("authorization") !== `Bearer ${env.CLARITY_AI_SECRET}`) {
       return json({ error: "Unauthorized" }, 401);
     }
+    if (!env.ANTHROPIC_API_KEY) {
+      console.error("Anthropic API key is not configured on the Worker.");
+      return json({ error: "Anthropic provider is not configured." }, 503);
+    }
 
-    let body: { messages?: ChatMessage[]; temperature?: number; max_tokens?: number };
+    let body: { messages?: ChatMessage[]; max_tokens?: number };
     try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
     const messages = body.messages;
     if (!Array.isArray(messages) || messages.length < 1 || messages.length > 20 ||
@@ -35,66 +38,70 @@ export default {
           typeof m.content !== "string" || !m.content.trim() || m.content.length > 12000)) {
       return json({ error: "Invalid messages: 1 to 20 messages, max 12,000 characters each." }, 400);
     }
-    const totalChars = messages.reduce((n, m) => n + m.content.length, 0);
-    if (totalChars > 30000) return json({ error: "Prompt too large." }, 413);
+    if (messages.reduce((n, m) => n + m.content.length, 0) > 30000) {
+      return json({ error: "Prompt too large." }, 413);
+    }
 
+    const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+    const conversation = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    if (!conversation.length || conversation[conversation.length - 1].role !== "user") {
+      return json({ error: "A user message is required as the final message." }, 400);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      const result = await env.AI.run(env.AI_MODEL || "@cf/zai-org/glm-4.7-flash", {
-        messages,
-        temperature: Math.min(1, Math.max(0, Number(body.temperature ?? 0.2))),
-        max_tokens: Math.min(1800, Math.max(100, Number(body.max_tokens ?? 1200))),
+      const upstream = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: Math.min(2048, Math.max(128, Number(body.max_tokens ?? 1200))),
+          ...(system ? { system } : {}),
+          messages: conversation,
+          output_config: { effort: "low" },
+        }),
+        signal: controller.signal,
       });
-      const output: any = result as any;
-      const choice = output?.choices?.[0];
-      const message = choice?.message;
-      const asText = (value: any): string => {
-        if (typeof value === "string") return value.trim();
-        if (Array.isArray(value)) {
-          return value.map((part) => {
-            if (typeof part === "string") return part;
-            if (part && typeof part.text === "string") return part.text;
-            return "";
-          }).join("").trim();
-        }
-        return "";
-      };
-      const candidates = [
-        asText(result),
-        asText(output?.response),
-        asText(output?.result),
-        asText(output?.content),
-        asText(output?.output_text),
-        asText(choice?.text),
-        asText(message?.content),
-        asText(choice?.delta?.content),
-        asText(output?.result?.response),
-        asText(output?.result?.content),
-      ];
-      const response = candidates.find((value) => value.length > 0);
-      if (!response) {
-        // Log only response shape metadata; never log prompts, credentials, or generated content.
-        console.error("Workers AI returned no text content", {
-          resultType: typeof result,
-          resultKeys: output && typeof output === "object" ? Object.keys(output).slice(0, 20) : [],
-          choiceKeys: choice && typeof choice === "object" ? Object.keys(choice).slice(0, 20) : [],
-          messageKeys: message && typeof message === "object" ? Object.keys(message).slice(0, 20) : [],
-          contentType: typeof message?.content,
-          contentIsArray: Array.isArray(message?.content),
+
+      const result: any = await upstream.json().catch(() => ({}));
+      if (!upstream.ok) {
+        console.error("Anthropic API request failed", {
+          status: upstream.status,
+          type: result?.error?.type || "unknown",
         });
         return json({
-          error: "Workers AI returned no text content.",
-          resultType: typeof result,
-          resultKeys: output && typeof output === "object" ? Object.keys(output).slice(0, 20) : [],
-          choiceKeys: choice && typeof choice === "object" ? Object.keys(choice).slice(0, 20) : [],
-          messageKeys: message && typeof message === "object" ? Object.keys(message).slice(0, 20) : [],
-          contentType: typeof message?.content,
-          contentIsArray: Array.isArray(message?.content),
-        }, 502);
+          error: "Anthropic API request failed.",
+          upstreamStatus: upstream.status,
+          upstreamType: result?.error?.type || "unknown",
+        }, upstream.status === 429 ? 429 : upstream.status >= 500 ? 503 : 502);
       }
-      return json({ success: true, model: env.AI_MODEL || "@cf/zai-org/glm-4.7-flash", response });
-    } catch (error) {
-      console.error("Workers AI invocation failed", error);
-      return json({ error: "AI temporarily unavailable. Please retry later." }, 503);
+
+      const response = Array.isArray(result?.content)
+        ? result.content.filter((part: any) => part?.type === "text" && typeof part.text === "string")
+            .map((part: any) => part.text).join("").trim()
+        : "";
+      if (!response) {
+        console.error("Anthropic returned no text content", {
+          stopReason: result?.stop_reason || "unknown",
+          contentTypes: Array.isArray(result?.content) ? result.content.map((part: any) => part?.type).slice(0, 10) : [],
+        });
+        return json({ error: "Anthropic returned no text content." }, 502);
+      }
+      return json({ success: true, model: MODEL, provider: "anthropic", response });
+    } catch (error: any) {
+      console.error("Anthropic request unavailable", { name: error?.name || "unknown" });
+      return json({
+        error: error?.name === "AbortError" ? "Anthropic request timed out." : "Anthropic temporarily unavailable.",
+      }, error?.name === "AbortError" ? 504 : 503);
+    } finally {
+      clearTimeout(timeout);
     }
   },
 };
