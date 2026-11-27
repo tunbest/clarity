@@ -34,14 +34,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLARITY_AI_SECRET: ${{ secrets.CLARITY_AI_SECRET }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || (echo "::error::Missing CLOUDFLARE_API_TOKEN" && exit 1)
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "::error::Missing CLOUDFLARE_ACCOUNT_ID" && exit 1)
           test -n "$CLARITY_AI_SECRET" || (echo "::error::Missing CLARITY_AI_SECRET" && exit 1)
-          test -n "$ANTHROPIC_API_KEY" || (echo "::error::Missing ANTHROPIC_API_KEY. Add it in GitHub Actions secrets." && exit 1)
 
-      # Deploy first so the Worker script exists before Wrangler writes its secret.
       - name: Deploy Worker
         working-directory: cloudflare-ai
         env:
@@ -53,19 +50,16 @@ jobs:
           export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
           wrangler deploy --config wrangler.toml
 
-      - name: Configure Worker secret
+      - name: Configure Worker authentication secret
         working-directory: cloudflare-ai
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLARITY_AI_SECRET: ${{ secrets.CLARITY_AI_SECRET }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           CLOUDFLARE_API_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '\r\n')"
           CLOUDFLARE_ACCOUNT_ID="$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '\r\n')"
           CLARITY_AI_SECRET="$(printf '%s' "$CLARITY_AI_SECRET" | tr -d '\r\n')"
-          ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '\r\n')"
           export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
           printf '%s' "$CLARITY_AI_SECRET" | wrangler secret put CLARITY_AI_SECRET --config wrangler.toml
-          printf '%s' "$ANTHROPIC_API_KEY" | wrangler secret put ANTHROPIC_API_KEY --config wrangler.toml
-          echo "Cloudflare Worker secrets configured successfully."
+          echo "Cloudflare Worker authentication secret configured."
