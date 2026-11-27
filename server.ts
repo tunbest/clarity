@@ -258,6 +258,72 @@ app.use('/api', async (req: Request, res: Response, next) => {
 });
 
 
+// Authenticated Clarity -> private FastAPI -> Gemini Flash project analysis.
+const projectAnalysisWindows = new Map<string, { count:number; resetAt:number }>();
+app.post('/api/analyse-projet', async (req: Request, res: Response) => {
+  const actor = getUserFromRequest(req);
+  if (!['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','CHEF_PROJET_PROD','PMO'].includes(actor.role)) {
+    return res.status(403).json({ error: 'Votre rôle ne permet pas de lancer une analyse projet.' });
+  }
+  const now = Date.now();
+  const prior = projectAnalysisWindows.get(String(actor.id));
+  if (prior && prior.resetAt > now && prior.count >= 5) {
+    return res.status(429).json({ error: 'Limite de 5 analyses par minute atteinte.' });
+  }
+  projectAnalysisWindows.set(String(actor.id), prior && prior.resetAt > now
+    ? { count: prior.count + 1, resetAt: prior.resetAt }
+    : { count: 1, resetAt: now + 60000 });
+
+  const projectId = String(req.body?.projectId || '');
+  if (!projectId || projectId.length > 128) return res.status(400).json({ error: 'projectId invalide.' });
+  const apiUrl = process.env.PROJECT_ANALYSIS_API_URL || 'http://project-analysis-api:8000';
+  const apiKey = process.env.PROJECT_ANALYSIS_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'Service d’analyse non configuré.' });
+
+  const pool = getPgPool()!;
+  const snapshot = await pool.query('SELECT projects FROM workspace_state WHERE id=1');
+  const projects: any[] = snapshot.rows[0]?.projects || [];
+  const project = projects.find((p: any) => String(p.id) === projectId);
+  if (!project || !isProjectVisibleToUser(project, actor)) return res.status(404).json({ error: 'Projet introuvable ou non accessible.' });
+
+  const safeProject = {
+    id: project.id, code: project.code, name: project.name, description: project.description,
+    status: project.status, priority: project.priority, startDate: project.startDate, endDate: project.endDate,
+    tasks: (project.tasks || []).map((t: any) => ({
+      id:t.id,title:t.title,description:t.description,status:t.status,priority:t.priority,
+      startDate:t.startDate,dueDate:t.dueDate,estimatedHours:t.estimatedHours,category:t.category
+    })),
+    milestones: (project.milestones || []).map((m: any) => ({
+      id:m.id,title:m.title,targetDate:m.targetDate,completed:m.completed,description:m.description
+    })),
+    risks: (project.risks || []).map((r: any) => ({
+      id:r.id,title:r.title,description:r.description,category:r.category,probability:r.probability,
+      impact:r.impact,mitigationPlan:r.mitigationPlan,status:r.status
+    }))
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 65000);
+  try {
+    const response = await fetch(apiUrl.replace(/\/$/, '') + '/analyse-projet', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ project_id: projectId, user_id: actor.id, project: safeProject }),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn('Project analysis service returned HTTP', response.status);
+      return res.status(response.status >= 400 && response.status < 500 ? response.status : 503)
+        .json({ error: data.detail || 'Analyse projet indisponible.' });
+    }
+    return res.json({ success: true, requiresApproval: true, analysis: data });
+  } catch (error: any) {
+    console.warn('Project analysis service unavailable:', error?.name || 'unknown');
+    return res.status(error?.name === 'AbortError' ? 504 : 503)
+      .json({ error: 'Service d’analyse projet temporairement indisponible.' });
+  } finally { clearTimeout(timeout); }
+});
+
 const aiAgentWindows = new Map<string, { count:number; resetAt:number }>();
 // AI agent planning: read the authoritative project snapshot and return a reviewable proposal only.
 app.post('/api/ai/agent/plan', async (req: Request, res: Response) => {
