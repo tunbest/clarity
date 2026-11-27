@@ -258,9 +258,13 @@ app.use('/api', async (req: Request, res: Response, next) => {
 });
 
 
+const aiAgentWindows = new Map<string, { count:number; resetAt:number }>();
 // AI agent planning: read the authoritative project snapshot and return a reviewable proposal only.
 app.post('/api/ai/agent/plan', async (req: Request, res: Response) => {
   const actor = getUserFromRequest(req);
+  const now = Date.now(); const prior = aiAgentWindows.get(String(actor.id));
+  if (prior && prior.resetAt > now && prior.count >= 10) return res.status(429).json({error:'Limite de 10 propositions IA par minute atteinte.'});
+  aiAgentWindows.set(String(actor.id), prior && prior.resetAt > now ? {count:prior.count+1,resetAt:prior.resetAt} : {count:1,resetAt:now+60000});
   const projectId = String(req.body?.projectId || '');
   const messages = req.body?.messages;
   if (!projectId || projectId.length > 128 || !Array.isArray(messages) || messages.length < 1 || messages.length > 10 || messages.some((m: any) => !m || !['user','assistant'].includes(m.role) || typeof m.content !== 'string' || !m.content.trim() || m.content.length > 5000)) return res.status(400).json({ error: 'Contexte ou conversation invalide.' });
