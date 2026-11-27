@@ -8,6 +8,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from typing import Literal
+from urllib.parse import quote
 
 import asyncpg
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -99,7 +100,7 @@ def _db_dsn() -> str:
     password = os.getenv("POSTGRES_PASSWORD", "")
     if not password:
         raise RuntimeError("POSTGRES_PASSWORD or DATABASE_URL must be configured")
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{database}"
 
 
 @asynccontextmanager
