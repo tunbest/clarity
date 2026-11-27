@@ -5,7 +5,7 @@ import { Project, Task, Milestone, Risk } from '../types';
 type Message = { role: 'user' | 'assistant'; content: string };
 type AgentChange = { type: string; description: string; data: any };
 
-interface Props { project: Project; onApplyProject: (project: Project) => void; }
+interface Props { project: Project; onApplyProject: (project: Project) => Promise<void> | void; }
 
 const makeId = () => `ai-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -52,7 +52,7 @@ export const CloudflareAIChat: React.FC<Props> = ({ project, onApplyProject }) =
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [proposal, setProposal] = useState<{ message: string; changes: AgentChange[]; project: Project } | null>(null);
-  const [applied, setApplied] = useState(false);
+  const [applied, setApplied] = useState(false);\n  const [applying, setApplying] = useState(false);
 
   const send = async () => {
     const content = prompt.trim();
@@ -70,7 +70,7 @@ export const CloudflareAIChat: React.FC<Props> = ({ project, onApplyProject }) =
     finally { setLoading(false); }
   };
 
-  const apply = () => { if (!proposal || applied) return; onApplyProject(proposal.project); setApplied(true); setProposal(null); setMessages(current => [...current, { role:'assistant', content:'Modifications transmises à Clarity pour enregistrement. Je te conseille de vérifier le projet et son planning.' }]); };
+  const apply = async () => { if (!proposal || applied || applying) return; setApplying(true); setError(''); try { await onApplyProject(proposal.project); setApplied(true); setProposal(null); setMessages(current => [...current, { role:'assistant', content:'Les modifications ont été enregistrées dans le projet Clarity. Vérifie le planning et les éléments mis à jour.' }]); } catch (err) { setError(err instanceof Error ? err.message : 'Échec de l’enregistrement de la proposition.'); } finally { setApplying(false); } };
   const discard = () => setProposal(null);
 
   return <section className='flex min-h-[520px] flex-col overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-sm'>
@@ -82,7 +82,7 @@ export const CloudflareAIChat: React.FC<Props> = ({ project, onApplyProject }) =
       {messages.length === 0 && <div className='rounded-xl bg-slate-50 p-4 text-sm text-slate-600'><p className='font-semibold text-slate-800'>Bonjour, je suis ton agent Clarity.</p><p className='mt-1'>Je peux analyser ce projet et préparer des changements sur ses informations, tâches, jalons et risques. Rien ne sera modifié avant ta validation.</p><p className='mt-2 text-xs text-slate-500'>Exemple : « Ajoute les tâches de préparation, tests de préproduction et validation CAB avant la MEP du 15 décembre. »</p></div>}
       {messages.map((message,index)=><div key={index} className={`flex ${message.role==='user'?'justify-end':'justify-start'}`}><div className={`max-w-[90%] whitespace-pre-wrap rounded-xl px-3 py-2 text-sm leading-relaxed ${message.role==='user'?'bg-indigo-600 text-white':'bg-slate-100 text-slate-800'}`}>{message.content}</div></div>)}
       {loading && <div className='flex items-center gap-2 text-xs text-slate-500'><Loader2 className='h-4 w-4 animate-spin'/> Analyse du projet et préparation de la proposition…</div>}
-      {proposal && <div className='rounded-xl border border-amber-300 bg-amber-50 p-4'><div className='flex items-center gap-2 text-sm font-bold text-amber-900'><ShieldCheck className='h-4 w-4'/> Proposition à valider</div><p className='mt-1 text-xs text-amber-800'>{proposal.changes.length} modification(s) préparée(s). Aucune n’est encore enregistrée.</p><ul className='mt-3 space-y-2'>{proposal.changes.map((change,index)=><li key={index} className='rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700'><span className='font-semibold'>{index+1}. </span>{change.description}</li>)}</ul><div className='mt-4 flex flex-wrap gap-2'><button type='button' onClick={apply} className='inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700'><CheckCircle2 className='h-4 w-4'/> Valider et appliquer</button><button type='button' onClick={discard} className='inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'><RotateCcw className='h-4 w-4'/> Refuser</button></div></div>}
+      {proposal && <div className='rounded-xl border border-amber-300 bg-amber-50 p-4'><div className='flex items-center gap-2 text-sm font-bold text-amber-900'><ShieldCheck className='h-4 w-4'/> Proposition à valider</div><p className='mt-1 text-xs text-amber-800'>{proposal.changes.length} modification(s) préparée(s). Aucune n’est encore enregistrée.</p><ul className='mt-3 space-y-2'>{proposal.changes.map((change,index)=><li key={index} className='rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700'><span className='font-semibold'>{index+1}. </span>{change.description}</li>)}</ul><div className='mt-4 flex flex-wrap gap-2'><button type='button' onClick={()=>void apply()} disabled={applying} className='inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50'>{applying?<Loader2 className='h-4 w-4 animate-spin'/>:<CheckCircle2 className='h-4 w-4'/>} {applying?'Enregistrement…':'Valider et appliquer'}</button><button type='button' onClick={discard} className='inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'><RotateCcw className='h-4 w-4'/> Refuser</button></div></div>}
       {applied && <div className='flex items-center gap-2 rounded-lg bg-emerald-50 p-3 text-xs font-medium text-emerald-800'><CheckCircle2 className='h-4 w-4'/> Modifications validées et envoyées à Clarity.</div>}
       {error && <p role='alert' className='text-xs text-rose-600'>{error}</p>}
     </div>
