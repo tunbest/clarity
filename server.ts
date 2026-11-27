@@ -106,7 +106,7 @@ async function callCloudflareAI(params: { prompt: string; isJson?: boolean }): P
 }
 
 // --- LOCAL AUTHENTICATION (PostgreSQL + opaque HttpOnly sessions) ---
-import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from 'node:crypto';
 import { promisify } from 'node:util';
 const scrypt = promisify(scryptCallback);
 const SESSION_COOKIE = 'clarity_session';
@@ -160,6 +160,7 @@ async function ensureAuthSchema() {
   await pool.query(`CREATE TABLE IF NOT EXISTS mep_workspace_state (id SMALLINT PRIMARY KEY CHECK (id=1), meps JSONB NOT NULL DEFAULT '[]'::jsonb, revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await pool.query(`INSERT INTO mep_workspace_state(id,meps,revision) VALUES(1,'[]'::jsonb,1) ON CONFLICT(id) DO NOTHING`);
   await pool.query(`CREATE TABLE IF NOT EXISTS system_settings (id SMALLINT PRIMARY KEY CHECK (id=1), settings JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS integration_secrets (provider TEXT PRIMARY KEY, encrypted_value TEXT NOT NULL, nonce TEXT NOT NULL, auth_tag TEXT NOT NULL, updated_by UUID REFERENCES app_users(id) ON DELETE SET NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await pool.query(`INSERT INTO system_settings(id,settings) VALUES(1,'{}'::jsonb) ON CONFLICT(id) DO NOTHING`);
   // First administrator is created only from deployment secrets; no demo/default account exists.
   const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
@@ -737,6 +738,87 @@ app.put('/api/admin/settings', async (req: Request, res: Response) => {
   await getPgPool()!.query('UPDATE system_settings SET settings=$1::jsonb,updated_at=NOW() WHERE id=1', [JSON.stringify(settings)]);
   res.json({ success: true });
 });
+// Gemini API credentials are encrypted at rest and are only manageable by system administrators.
+function getSecretsEncryptionKey(): Buffer {
+  const raw = process.env.CLARITY_SECRETS_ENCRYPTION_KEY || '';
+  if (!/^[a-f0-9]{64}$/i.test(raw)) throw new Error('CLARITY_SECRETS_ENCRYPTION_KEY is not configured correctly.');
+  return Buffer.from(raw, 'hex');
+}
+function encryptIntegrationSecret(value: string) {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', getSecretsEncryptionKey(), nonce);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return { encrypted: encrypted.toString('base64'), nonce: nonce.toString('base64'), authTag: cipher.getAuthTag().toString('base64') };
+}
+function decryptIntegrationSecret(row: any): string {
+  const decipher = createDecipheriv('aes-256-gcm', getSecretsEncryptionKey(), Buffer.from(row.nonce, 'base64'));
+  decipher.setAuthTag(Buffer.from(row.auth_tag, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(row.encrypted_value, 'base64')), decipher.final()]).toString('utf8');
+}
+function requireSystemAdmin(req: Request, res: Response): boolean {
+  const actor = (req as any).authUser as AppUser | undefined;
+  if (!actor || actor.role !== 'ADMINISTRATEUR') { res.status(403).json({ error: 'Accès administrateur requis.' }); return false; }
+  return true;
+}
+
+app.get('/api/admin/gemini/status', async (req: Request, res: Response) => {
+  if (!requireSystemAdmin(req, res)) return;
+  const result = await getPgPool()!.query("SELECT updated_at FROM integration_secrets WHERE provider='google-gemini'");
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ configured: Boolean(result.rowCount), provider: 'Google Gemini Flash', updatedAt: result.rows[0]?.updated_at || null });
+});
+
+app.put('/api/admin/gemini/key', async (req: Request, res: Response) => {
+  if (!requireSystemAdmin(req, res)) return;
+  const apiKey = String(req.body?.apiKey || '').trim();
+  if (apiKey.length < 20 || apiKey.length > 512 || /\\s/.test(apiKey)) return res.status(400).json({ error: 'Clé API invalide.' });
+  try {
+    const encrypted = encryptIntegrationSecret(apiKey);
+    const actor = (req as any).authUser as AppUser;
+    await getPgPool()!.query(`INSERT INTO integration_secrets(provider,encrypted_value,nonce,auth_tag,updated_by,updated_at)
+      VALUES('google-gemini',$1,$2,$3,$4,NOW())
+      ON CONFLICT(provider) DO UPDATE SET encrypted_value=EXCLUDED.encrypted_value,nonce=EXCLUDED.nonce,auth_tag=EXCLUDED.auth_tag,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
+      [encrypted.encrypted, encrypted.nonce, encrypted.authTag, actor.id]);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ success: true, configured: true });
+  } catch (error: any) {
+    console.error('Gemini key encryption/storage failed:', error?.message || 'unknown');
+    res.status(503).json({ error: 'Stockage sécurisé indisponible. Vérifiez la configuration serveur.' });
+  }
+});
+
+app.delete('/api/admin/gemini/key', async (req: Request, res: Response) => {
+  if (!requireSystemAdmin(req, res)) return;
+  await getPgPool()!.query("DELETE FROM integration_secrets WHERE provider='google-gemini'");
+  res.json({ success: true, configured: false });
+});
+
+app.post('/api/admin/gemini/test', async (req: Request, res: Response) => {
+  if (!requireSystemAdmin(req, res)) return;
+  const stored = await getPgPool()!.query("SELECT encrypted_value,nonce,auth_tag FROM integration_secrets WHERE provider='google-gemini'");
+  if (!stored.rowCount) return res.status(409).json({ error: 'Aucune clé Gemini configurée.' });
+  const apiKey = decryptIntegrationSecret(stored.rows[0]);
+  const serviceKey = process.env.PROJECT_ANALYSIS_API_KEY || '';
+  if (!serviceKey) return res.status(503).json({ error: 'Service d’analyse indisponible.' });
+  const started = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch((process.env.PROJECT_ANALYSIS_API_URL || 'http://project-analysis-api:8000').replace(/\\/$/, '') + '/test-gemini', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': serviceKey, 'x-gemini-key': apiKey },
+      body: JSON.stringify({}),
+      signal: controller.signal
+    });
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(response.status >= 400 && response.status < 500 ? response.status : 503).json({ error: data.detail || 'Test Gemini impossible.' });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ success: true, model: data.model || 'Gemini Flash', latencyMs: Date.now() - started });
+  } catch (error: any) {
+    return res.status(error?.name === 'AbortError' ? 504 : 503).json({ error: 'Service Gemini temporairement indisponible.' });
+  } finally { clearTimeout(timeout); }
+});
+
 app.get('/api/users', async (_req: Request,res: Response) => {
   const r=await getPgPool()!.query('SELECT id,display_name AS "displayName",email,role,job_title AS "jobTitle",department FROM app_users ORDER BY display_name');
   res.json({success:true,users:r.rows});
