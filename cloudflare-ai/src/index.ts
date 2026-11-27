@@ -39,7 +39,7 @@ export default {
     if (totalChars > 30000) return json({ error: "Prompt too large." }, 413);
 
     try {
-      const result = await env.AI.run(env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct", {
+      const result = await env.AI.run(env.AI_MODEL || "@cf/zai-org/glm-4.7-flash", {
         messages,
         temperature: Math.min(1, Math.max(0, Number(body.temperature ?? 0.2))),
         max_tokens: Math.min(1800, Math.max(100, Number(body.max_tokens ?? 1200))),
@@ -47,7 +47,7 @@ export default {
       const response = typeof result === "string" ? result :
         (result as any)?.response || (result as any)?.result || "";
       if (!response) return json({ error: "The AI provider returned an empty response." }, 502);
-      return json({ success: true, model: env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct", response });
+      return json({ success: true, model: env.AI_MODEL || "@cf/zai-org/glm-4.7-flash", response });
     } catch (error) {
       console.error("Workers AI invocation failed", error);
       return json({ error: "AI temporarily unavailable. Please retry later." }, 503);
