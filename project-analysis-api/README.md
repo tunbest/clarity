@@ -10,15 +10,11 @@ The FastAPI container is not published to the host. It is attached only to Docke
 
 ## Configuration
 
-Add the following to `/root/clarity-prod/.env` on the VPS:
+Configure the Google Gemini key in **Clarity > Administration > API IA Copilot > Clé API Google Gemini Flash**. The browser sends the key only to the authenticated Clarity backend. Clarity encrypts it with AES-256-GCM before storing it in PostgreSQL. The persistent master encryption key `CLARITY_SECRETS_ENCRYPTION_KEY` is generated once by the deployment workflow and stored in the VPS environment file; it must be backed up and must never be rotated automatically.
 
-```env
-GEMINI_API_KEY=your-google-ai-studio-key
-```
+The deployment workflow generates and rotates the private `PROJECT_ANALYSIS_API_KEY` used between the Clarity backend and FastAPI. The Gemini key is decrypted only server-side and passed to the private FastAPI container over the internal Docker network. It is never returned to the browser or written to logs.
 
-The deployment workflow generates and persists `PROJECT_ANALYSIS_API_KEY` automatically if it does not exist. The same key is injected into the Clarity app and this private API. Do not commit either secret.
-
-Create a Gemini API key in Google AI Studio. The model can be overridden with `GEMINI_MODEL`; default is `gemini-3.8-flash`.
+Create a Gemini API key in Google AI Studio, then paste it directly into the Clarity admin interface. The model can be overridden with `GEMINI_MODEL`; default is `gemini-3.8-flash`.
 
 ## API
 
