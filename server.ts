@@ -282,6 +282,11 @@ app.post('/api/analyse-projet', async (req: Request, res: Response) => {
   if (!apiKey) return res.status(503).json({ error: 'Service d’analyse non configuré.' });
 
   const pool = getPgPool()!;
+  const geminiSecret = await pool.query("SELECT encrypted_value,nonce,auth_tag FROM integration_secrets WHERE provider='google-gemini'");
+  if (!geminiSecret.rowCount) return res.status(503).json({ error: 'Clé Gemini non configurée. Contactez un administrateur Clarity.' });
+  let geminiApiKey: string;
+  try { geminiApiKey = decryptIntegrationSecret(geminiSecret.rows[0]); }
+  catch { return res.status(503).json({ error: 'Impossible de déchiffrer la configuration Gemini.' }); }
   const snapshot = await pool.query('SELECT projects FROM workspace_state WHERE id=1');
   const projects: any[] = snapshot.rows[0]?.projects || [];
   const project = projects.find((p: any) => String(p.id) === projectId);
@@ -307,7 +312,7 @@ app.post('/api/analyse-projet', async (req: Request, res: Response) => {
   try {
     const response = await fetch(apiUrl.replace(/\/$/, '') + '/analyse-projet', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'x-gemini-key': geminiApiKey },
       body: JSON.stringify({ project_id: projectId, user_id: actor.id, project: safeProject }),
       signal: controller.signal
     });
