@@ -258,6 +258,34 @@ app.use('/api', async (req: Request, res: Response, next) => {
 });
 
 
+// AI agent planning: read the authoritative project snapshot and return a reviewable proposal only.
+app.post('/api/ai/agent/plan', async (req: Request, res: Response) => {
+  const actor = getUserFromRequest(req);
+  const projectId = String(req.body?.projectId || '');
+  const messages = req.body?.messages;
+  if (!projectId || projectId.length > 128 || !Array.isArray(messages) || messages.length < 1 || messages.length > 10 || messages.some((m: any) => !m || !['user','assistant'].includes(m.role) || typeof m.content !== 'string' || !m.content.trim() || m.content.length > 5000)) return res.status(400).json({ error: 'Contexte ou conversation invalide.' });
+  if (messages.reduce((n: number, m: any) => n + m.content.length, 0) > 14000) return res.status(413).json({ error: 'Conversation trop volumineuse.' });
+  const pool = getPgPool()!;
+  const snapshot = await pool.query('SELECT projects,revision FROM workspace_state WHERE id=1');
+  const projects: any[] = snapshot.rows[0]?.projects || [];
+  const project = projects.find((p: any) => String(p.id) === projectId);
+  if (!project || !isProjectVisibleToUser(project, actor)) return res.status(404).json({ error: 'Projet introuvable ou non accessible.' });
+  if (!['ADMINISTRATEUR','DIRECTEUR_PROJETS','CHEF_PROJET','CHEF_PROJET_PROD','PMO'].includes(actor.role)) return res.status(403).json({ error: 'Votre rôle ne permet pas de préparer des modifications du projet.' });
+  const safeProject = { id:project.id, code:project.code, name:project.name, description:project.description, status:project.status, priority:project.priority, startDate:project.startDate, endDate:project.endDate, tasks:(project.tasks||[]).map((t:any)=>({id:t.id,title:t.title,description:t.description,status:t.status,priority:t.priority,startDate:t.startDate,dueDate:t.dueDate,estimatedHours:t.estimatedHours,category:t.category})), milestones:(project.milestones||[]).map((m:any)=>({id:m.id,title:m.title,targetDate:m.targetDate,completed:m.completed,description:m.description})), risks:(project.risks||[]).map((r:any)=>({id:r.id,title:r.title,description:r.description,category:r.category,probability:r.probability,impact:r.impact,mitigationPlan:r.mitigationPlan,status:r.status})) };
+  const prompt = ['Tu es Clarity AI, agent de gestion de projet. Réponds uniquement en JSON valide : {"message":"...","changes":[...]}. Réponds en français. Tu prépares des propositions, tu ne les exécutes jamais. N’invente aucune donnée. Si une information manque, changes doit être vide et message doit poser une question.', 'Types autorisés : update_project, create_task, update_task, create_milestone, update_milestone, create_risk, update_risk. Chaque changement contient type, description et data. Pour update_task/update_milestone/update_risk, data contient targetId et updates. Pour update_project, data contient uniquement les champs modifiés.', 'Projet : champs modifiables name, description, status (PLANNING, IN_PROGRESS, ON_HOLD, COMPLETED, AT_RISK), priority (LOW, MEDIUM, HIGH, CRITICAL), startDate, endDate. Tâche : title, description, status (TODO, IN_PROGRESS, REVIEW, DONE, BLOCKED), priority, startDate, dueDate, estimatedHours, category. Jalon : title, targetDate, description. Risque : title, description, category (TECHNIQUE, DELAIS, RESSOURCES, JURIDIQUE, EXTERNE), probability 1-5, impact 1-5, mitigationPlan.', 'Aucune suppression. Maximum 15 changements. Modifie uniquement ce qui est explicitement demandé.', 'PROJET ACTUEL : '+JSON.stringify(safeProject), 'CONVERSATION : '+JSON.stringify(messages.slice(-8))].join('\n\n');
+  const raw = await callCloudflareAI({ prompt, isJson: true });
+  if (!raw) return res.status(503).json({ error: 'Clarity AI indisponible. Aucune modification effectuée.' });
+  try {
+    const parsed = JSON.parse(raw.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim());
+    const allowed = ['update_project','create_task','update_task','create_milestone','update_milestone','create_risk','update_risk'];
+    if (!parsed || typeof parsed.message !== 'string' || !Array.isArray(parsed.changes) || parsed.changes.length > 15 || parsed.changes.some((c:any)=>!c || !allowed.includes(c.type) || typeof c.description !== 'string' || !c.data || typeof c.data !== 'object' || Array.isArray(c.data))) throw new Error('Format invalide');
+    for (const c of parsed.changes) {
+      if (c.type === 'update_project' && Object.keys(c.data).some((k:string)=>!['name','description','status','priority','startDate','endDate'].includes(k))) throw new Error('Champ projet interdit');
+      if (['update_task','update_milestone','update_risk'].includes(c.type)) { const list = c.type === 'update_task' ? safeProject.tasks : c.type === 'update_milestone' ? safeProject.milestones : safeProject.risks; if (!list.some((x:any)=>x.id===c.data.targetId) || !c.data.updates || typeof c.data.updates !== 'object') throw new Error('Cible inconnue'); }
+    }
+    return res.json({ success:true, message:parsed.message, changes:parsed.changes, projectId, workspaceRevision:Number(snapshot.rows[0]?.revision||1), requiresApproval:true });
+  } catch (error:any) { console.warn('Invalid AI agent proposal:', error?.message||error); return res.status(502).json({ error:'Proposition IA invalide. Aucune modification effectuée.' }); }
+});
 /**
  * Clarity AI gateway. The user is authenticated by the middleware above;
  * the Cloudflare credential is server-side only and is never returned to clients.
