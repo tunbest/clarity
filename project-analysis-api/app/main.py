@@ -124,9 +124,7 @@ async def lifespan(app: FastAPI):
             )
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS project_analyses_project_created_idx ON project_analyses(project_id, created_at DESC)")
-    app.state.gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"]) if os.getenv("GEMINI_API_KEY") else None
     yield
-    await app.state.gemini.aio.aclose()
     await app.state.db.close()
 
 
@@ -140,8 +138,33 @@ async def require_api_key(x_api_key: str | None = Header(default=None, alias="X-
 
 @app.get("/health")
 async def health(request: Request):
-    configured = request.app.state.gemini is not None
-    return {"status": "ok" if configured else "degraded", "gemini_configured": configured, "service": "clarity-project-analysis", "model": MODEL}
+    return {"status": "ok", "gemini_configured": "managed_by_admin", "service": "clarity-project-analysis", "model": MODEL}
+
+@app.post("/test-gemini", dependencies=[Depends(require_api_key)])
+async def test_gemini(x_gemini_key: str | None = Header(default=None, alias="X-Gemini-Key")):
+    if not x_gemini_key or len(x_gemini_key) < 20:
+        raise HTTPException(status_code=400, detail="Gemini API key is missing")
+    client = genai.Client(api_key=x_gemini_key)
+    try:
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=MODEL,
+                contents='Réponds uniquement par le mot OK.',
+                config=types.GenerateContentConfig(max_output_tokens=16, temperature=0),
+            ),
+            timeout=15,
+        )
+        if not (response.text or "").strip():
+            raise HTTPException(status_code=502, detail="Gemini returned an empty response")
+        return {"success": True, "model": MODEL}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Gemini connection timed out")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502, detail="Gemini API key rejected or provider unavailable")
+    finally:
+        await client.aio.aclose()
 
 
 def calculate_health(project: ProjectInput, assessment: ModelAssessment) -> tuple[int, str, list[str]]:
@@ -227,15 +250,16 @@ def make_generated_tasks(actions: list[CorrectiveAction]) -> list[dict]:
 
 
 @app.post("/analyse-projet", response_model=AnalyseResponse, dependencies=[Depends(require_api_key)])
-async def analyse_projet(payload: AnalyseRequest, request: Request):
-    if request.app.state.gemini is None:
-        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured on the Clarity server")
+async def analyse_projet(payload: AnalyseRequest, request: Request, x_gemini_key: str | None = Header(default=None, alias="X-Gemini-Key")):
+    if not x_gemini_key or len(x_gemini_key) < 20:
+        raise HTTPException(status_code=503, detail="Gemini API key is not configured in Clarity Administration")
     project_data = payload.project.model_dump(mode="json")
     if payload.project_id != payload.project.id:
         raise HTTPException(status_code=400, detail="project_id does not match project.id")
     if len(json.dumps(project_data, ensure_ascii=False).encode("utf-8")) > MAX_PROJECT_BYTES:
         raise HTTPException(status_code=413, detail="Project payload too large")
 
+    client = genai.Client(api_key=x_gemini_key)
     prompt = (
         "Tu es un directeur de projet senior et PMO. Analyse factuellement le projet fourni. "
         "Réponds en français. N'invente jamais de faits : chaque risque doit citer un élément observable "
@@ -248,7 +272,7 @@ async def analyse_projet(payload: AnalyseRequest, request: Request):
     )
     try:
         response = await asyncio.wait_for(
-            request.app.state.gemini.aio.models.generate_content(
+            client.aio.models.generate_content(
                 model=MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -267,6 +291,8 @@ async def analyse_projet(payload: AnalyseRequest, request: Request):
         raise HTTPException(status_code=502, detail="Gemini returned an invalid structured analysis")
     except Exception:
         raise HTTPException(status_code=503, detail="Gemini service temporarily unavailable")
+    finally:
+        await client.aio.aclose()
 
     score, health_label, reasons = calculate_health(payload.project, assessment)
     analysis_id = __import__("uuid").uuid4()
