@@ -137,7 +137,7 @@ jobs:
           COMPOSE=(docker compose --project-directory "$STACK_DIR" --env-file "$STACK_DIR/.env" -f "$STACK_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
 
           "${COMPOSE[@]}" config --quiet
-          "${COMPOSE[@]}" up -d --build app
+          "${COMPOSE[@]}" up -d --build app project-analysis-api
 
           healthy=0
           for attempt in $(seq 1 36); do
