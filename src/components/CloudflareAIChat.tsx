@@ -52,7 +52,8 @@ export const CloudflareAIChat: React.FC<Props> = ({ project, onApplyProject }) =
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [proposal, setProposal] = useState<{ message: string; changes: AgentChange[]; project: Project } | null>(null);
-  const [applied, setApplied] = useState(false);\n  const [applying, setApplying] = useState(false);
+  const [applied, setApplied] = useState(false);
+  const [applying, setApplying] = useState(false);
 
   const send = async () => {
     const content = prompt.trim();
