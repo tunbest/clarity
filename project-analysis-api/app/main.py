@@ -108,8 +108,6 @@ def _db_dsn() -> str:
 async def lifespan(app: FastAPI):
     if not API_KEY or len(API_KEY) < 32:
         raise RuntimeError("PROJECT_ANALYSIS_API_KEY must contain at least 32 characters")
-    if not os.getenv("GEMINI_API_KEY"):
-        raise RuntimeError("GEMINI_API_KEY is missing")
     app.state.db = await asyncpg.create_pool(_db_dsn(), min_size=1, max_size=5, command_timeout=15)
     async with app.state.db.acquire() as conn:
         await conn.execute("""
@@ -126,7 +124,7 @@ async def lifespan(app: FastAPI):
             )
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS project_analyses_project_created_idx ON project_analyses(project_id, created_at DESC)")
-    app.state.gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    app.state.gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"]) if os.getenv("GEMINI_API_KEY") else None
     yield
     await app.state.gemini.aio.aclose()
     await app.state.db.close()
@@ -141,8 +139,9 @@ async def require_api_key(x_api_key: str | None = Header(default=None, alias="X-
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "service": "clarity-project-analysis", "model": MODEL}
+async def health(request: Request):
+    configured = request.app.state.gemini is not None
+    return {"status": "ok" if configured else "degraded", "gemini_configured": configured, "service": "clarity-project-analysis", "model": MODEL}
 
 
 def calculate_health(project: ProjectInput, assessment: ModelAssessment) -> tuple[int, str, list[str]]:
@@ -229,6 +228,8 @@ def make_generated_tasks(actions: list[CorrectiveAction]) -> list[dict]:
 
 @app.post("/analyse-projet", response_model=AnalyseResponse, dependencies=[Depends(require_api_key)])
 async def analyse_projet(payload: AnalyseRequest, request: Request):
+    if request.app.state.gemini is None:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured on the Clarity server")
     project_data = payload.project.model_dump(mode="json")
     if payload.project_id != payload.project.id:
         raise HTTPException(status_code=400, detail="project_id does not match project.id")
