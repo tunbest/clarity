@@ -689,7 +689,7 @@ export const App: React.FC = () => {
           project={activeProject}
           metrics={metrics}
           onClose={() => setIsAIAssistantOpen(false)}
-          onAddTasksToProject={handleAddTasksFromAI}
+          onApplyProject={handleUpdateProject}
         />
       )}
 
