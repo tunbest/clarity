@@ -25,7 +25,7 @@ La connexion ne donne pas à Clarity accès au moteur Copilot, aux données Micr
    - `VITE_MICROSOFT_CLIENT_ID` : ID d'application (client).
    - `VITE_MICROSOFT_TENANT_ID` : ID du tenant pour un déploiement mono-tenant. Pour autoriser tous les comptes professionnels, utiliser `organizations`.
 
-Les variables `VITE_*` sont intégrées au bundle frontend : le Client ID et le Tenant ID ne sont pas des secrets. Ne jamais y placer de secret client.
+Les variables `VITE_*` sont intégrées au bundle frontend au moment du build. Le workflow de déploiement les transmet depuis le fichier `.env` du stack Docker vers les arguments de build. Le Client ID et le Tenant ID ne sont pas des secrets. Ne jamais y placer de secret client. Ajouter au fichier `.env` du stack de production :\n\n```dotenv\nVITE_MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\nVITE_MICROSOFT_TENANT_ID=organizations\n```
 
 ## Test
 
