@@ -7,7 +7,7 @@ export interface Env {
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
-const MODEL = "@cf/zai-org/glm-4.7-flash";
+const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
