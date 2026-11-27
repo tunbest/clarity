@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Project, ProjectMetrics, Task } from '../types';
+import { CloudflareAIChat } from './CloudflareAIChat';
 import { 
   Sparkles, 
   X, 
@@ -269,7 +270,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         </div>
 
         {/* Tab Content Body */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-4">
+        <div className="p-6 overflow-y-auto flex-1 space-y-4">\n          <CloudflareAIChat projectName={project.name} projectCode={project.code} />
           
           {/* TAB 1: AUDIT 360 */}
           {activeTab === 'AUDIT' && (
