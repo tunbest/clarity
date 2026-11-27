@@ -18,8 +18,8 @@ function buildProjectProposal(project: Project, changes: AgentChange[]): Project
       const patch = Object.fromEntries(Object.entries(data).filter(([key]) => allowed.includes(key)));
       next = { ...next, ...patch };
     } else if (change.type === 'create_task') {
-      if (!String(data.title || '').trim()) continue;
-      const task: Task = { id: makeId(), projectId: project.id, title: String(data.title).slice(0,200), description: String(data.description || ''), status: data.status || 'TODO', priority: data.priority || 'MEDIUM', startDate: data.startDate || new Date().toISOString().slice(0,10), dueDate: data.dueDate || new Date(Date.now()+14*86400000).toISOString().slice(0,10), estimatedHours: Math.max(0, Number(data.estimatedHours) || 8), actualHours: 0, completionPercent: 0, category: String(data.category || 'Général'), tags: ['IA-Clarity'] };
+      if (!String(data.title || '').trim() || !data.startDate || !data.dueDate) continue;
+      const task: Task = { id: makeId(), projectId: project.id, title: String(data.title).slice(0,200), description: String(data.description || ''), status: data.status || 'TODO', priority: data.priority || 'MEDIUM', startDate: String(data.startDate), dueDate: String(data.dueDate), estimatedHours: Math.max(0, Number(data.estimatedHours) || 8), actualHours: 0, completionPercent: 0, category: String(data.category || 'Général'), tags: ['IA-Clarity'] };
       next.tasks = [...next.tasks, task];
     } else if (change.type === 'update_task') {
       const allowed = ['title','description','status','priority','startDate','dueDate','estimatedHours','category'];
@@ -34,8 +34,8 @@ function buildProjectProposal(project: Project, changes: AgentChange[]): Project
       const patch = Object.fromEntries(Object.entries(data.updates || {}).filter(([key]) => allowed.includes(key)));
       next.milestones = next.milestones.map(item => item.id === data.targetId ? { ...item, ...patch } : item);
     } else if (change.type === 'create_risk') {
-      if (!String(data.title || '').trim()) continue;
-      const risk: Risk = { id: makeId(), projectId: project.id, title: String(data.title).slice(0,200), description: String(data.description || ''), category: data.category || 'TECHNIQUE', probability: Math.min(5,Math.max(1,Number(data.probability)||3)), impact: Math.min(5,Math.max(1,Number(data.impact)||3)), mitigationPlan: String(data.mitigationPlan || 'À définir'), status: 'ACTIVE' };
+      if (!String(data.title || '').trim() || !data.category || !Number.isInteger(data.probability) || !Number.isInteger(data.impact) || !String(data.mitigationPlan || '').trim()) continue;
+      const risk: Risk = { id: makeId(), projectId: project.id, title: String(data.title).slice(0,200), description: String(data.description || ''), category: data.category, probability: Number(data.probability), impact: Number(data.impact), mitigationPlan: String(data.mitigationPlan), status: 'ACTIVE' };
       next.risks = [...next.risks, risk];
     } else if (change.type === 'update_risk') {
       const allowed = ['title','description','category','probability','impact','mitigationPlan','status'];
