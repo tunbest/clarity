@@ -45,28 +45,50 @@ export default {
         max_tokens: Math.min(1800, Math.max(100, Number(body.max_tokens ?? 1200))),
       });
       const output: any = result as any;
+      const choice = output?.choices?.[0];
+      const message = choice?.message;
+      const asText = (value: any): string => {
+        if (typeof value === "string") return value.trim();
+        if (Array.isArray(value)) {
+          return value.map((part) => {
+            if (typeof part === "string") return part;
+            if (part && typeof part.text === "string") return part.text;
+            return "";
+          }).join("").trim();
+        }
+        return "";
+      };
       const candidates = [
-        typeof result === "string" ? result : undefined,
-        output?.response,
-        output?.result,
-        output?.content,
-        output?.output_text,
-        output?.choices?.[0]?.message?.content,
-        output?.result?.response,
-        output?.result?.content,
+        asText(result),
+        asText(output?.response),
+        asText(output?.result),
+        asText(output?.content),
+        asText(output?.output_text),
+        asText(choice?.text),
+        asText(message?.content),
+        asText(choice?.delta?.content),
+        asText(output?.result?.response),
+        asText(output?.result?.content),
       ];
-      const response = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
+      const response = candidates.find((value) => value.length > 0);
       if (!response) {
-        // Return shape metadata only: never expose prompts, credentials, or model internals.
-        console.error("Workers AI returned an unrecognized/empty payload", {
+        // Log only response shape metadata; never log prompts, credentials, or generated content.
+        console.error("Workers AI returned no text content", {
           resultType: typeof result,
           resultKeys: output && typeof output === "object" ? Object.keys(output).slice(0, 20) : [],
-          nestedResultKeys: output?.result && typeof output.result === "object" ? Object.keys(output.result).slice(0, 20) : [],
+          choiceKeys: choice && typeof choice === "object" ? Object.keys(choice).slice(0, 20) : [],
+          messageKeys: message && typeof message === "object" ? Object.keys(message).slice(0, 20) : [],
+          contentType: typeof message?.content,
+          contentIsArray: Array.isArray(message?.content),
         });
         return json({
           error: "Workers AI returned no text content.",
           resultType: typeof result,
           resultKeys: output && typeof output === "object" ? Object.keys(output).slice(0, 20) : [],
+          choiceKeys: choice && typeof choice === "object" ? Object.keys(choice).slice(0, 20) : [],
+          messageKeys: message && typeof message === "object" ? Object.keys(message).slice(0, 20) : [],
+          contentType: typeof message?.content,
+          contentIsArray: Array.isArray(message?.content),
         }, 502);
       }
       return json({ success: true, model: env.AI_MODEL || "@cf/zai-org/glm-4.7-flash", response });
