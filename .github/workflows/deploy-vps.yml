@@ -68,6 +68,8 @@ jobs:
           test -d "$STACK_DIR" || { echo "Production stack directory is missing: $STACK_DIR" >&2; exit 1; }
           test -f "$STACK_DIR/docker-compose.yml" || { echo "Production Compose file is missing." >&2; exit 1; }
           test -f "$STACK_DIR/.env" || { echo "Production environment file is missing." >&2; exit 1; }
+          grep -q '^CLOUDFLARE_AI_SECRET=.' "$STACK_DIR/.env" || { echo "CLOUDFLARE_AI_SECRET is missing from production .env." >&2; exit 1; }
+          grep -q '^CLOUDFLARE_AI_URL=.' "$STACK_DIR/.env" || { echo "CLOUDFLARE_AI_URL is missing from production .env." >&2; exit 1; }
           test -f "$STACK_DIR/db-init/01-create-app-role.sh" || test -f "$STACK_DIR/db-init/sync-app-role.sh" || { echo "Database role initialization/sync script is missing." >&2; exit 1; }
           docker network inspect shared_network >/dev/null 2>&1 || { echo "External Docker network shared_network is missing." >&2; exit 1; }
 
@@ -99,6 +101,8 @@ jobs:
           cat > "$OVERRIDE_FILE" <<'YAML'
           services:
             app:
+              env_file:
+                - /root/clarity-prod/.env
               build:
                 context: /root/vp
                 dockerfile: Dockerfile
