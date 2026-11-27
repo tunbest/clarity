@@ -5,7 +5,7 @@ import { PublicClientApplication, type AccountInfo } from '@azure/msal-browser';
 const MICROSOFT_CLIENT_ID = import.meta.env.VITE_MICROSOFT_CLIENT_ID?.trim() || '';
 const MICROSOFT_TENANT_ID = import.meta.env.VITE_MICROSOFT_TENANT_ID?.trim() || 'organizations';
 const MICROSOFT_AUTHORITY = `https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}`;
-const MICROSOFT_REDIRECT_URI = `${window.location.origin}/auth/popup.html`;
+const MICROSOFT_REDIRECT_URI = `${window.location.origin}/redirect.html`;
 const COPILOT_URL = 'https://m365.cloud.microsoft/chat';
 
 export const MicrosoftCopilotConnection: React.FC = () => {
